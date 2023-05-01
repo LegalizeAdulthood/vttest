@@ -1,4 +1,4 @@
-/* $Id: nonvt100.c,v 1.62 2012/05/04 22:09:34 tom Exp $ */
+/* $Id: nonvt100.c,v 1.64 2014/01/16 22:04:56 tom Exp $ */
 
 /*
  * The list of non-VT320 codes was compiled using the list of non-VT320 codes
@@ -30,18 +30,14 @@ tst_CBT(MENU_ARGS)
   int count;
   int last = max_lines - 3;
   int row;
-  int top;
   int lft;
-  int bot;
   int rgt;
   char temp[80];
 
   test_with_margins(TRUE);
 
-  top = get_top_margin();
   lft = get_left_margin();
   rgt = get_right_margin();
-  bot = get_bottom_margin(last);
 
   /* ignore left/right margins unless origin mode is set */
   if (origin_mode) {
@@ -166,17 +162,13 @@ tst_CHT(MENU_ARGS)
   int n;
   int last_tab;
   int last = max_lines - 4;
-  int top;
   int lft;
-  int bot;
   int rgt;
 
   test_with_margins(TRUE);
 
   set_colors(WHITE_ON_BLUE);
 
-  top = get_top_margin();
-  bot = get_bottom_margin(last);
   lft = get_left_margin();
   rgt = get_right_margin();
   last_tab = ((rgt * 2 - lft + 1) + (TABWIDTH - 1)) / TABWIDTH;
@@ -458,7 +450,7 @@ tst_REP(MENU_ARGS)
   for (n = 1; n <= min_cols; n++)
     printf("%c", (n == last || n == last + 1) ? '+' : '*');
   vt_move(last + 1, 1);
-  ruler(last, min_cols);
+  ruler(last + 1, min_cols);
   println(the_title);
   println("There should be a diagonal of 2 +'s down to the row of *'s above this message.");
   println("The ++ in the row of *'s is the target.  If there are 11 +'s, ECMA-48 does");
@@ -486,7 +478,7 @@ tst_SD(MENU_ARGS)
     sd(1);
   }
   vt_move(last + 1, 1);
-  ruler(last, min_cols);
+  ruler(last + 1, min_cols);
   vt_clear(0);
   println(the_title);
   println("There should be a horizontal row of *'s above, just above the message.");

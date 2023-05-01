@@ -1,5 +1,49 @@
--- $Id: CHANGES,v 1.163 2013/08/18 18:23:16 tom Exp $
+-- $Id: CHANGES,v 1.177 2014/01/16 21:31:20 tom Exp $
 -------------------------------------------------------------------------------
+
+20140116
+	+ cosmetic changes (suggested by Itay Chamiel):
+
+	  + clear screen just before resetting SCS in menu #3 character sets,
+	    in case a VT100 emulator does not simply ignore VT220 G2/G3
+	    selections when it does not implement them.
+
+	  + add check for maximum operating level before deciding whether
+	    to send a DECSCL to set it to VT100-level.
+
+	  + adjust starting point of items for menu #9 "Test of known bugs"
+	    to avoid overwriting part of the description of the test.
+
+	+ add configure check for -Wlogical-op to gcc-warnings
+
+	+ update config.guess, config.sub
+
+20130915
+	+ when NRCS is active, suppress ISO Latin-1 from menu to avoid
+	  confusion with British NRCS.
+
+	+ do not highlight ISO Latin-1 for NRCS, since it is a 96-character
+	  set, not applicable to NRCS.
+
+	+ correct position of ruler for SD and REP screens, which obscured the
+	  result.
+
+	+ expand menu 11.6.6 to demonstrate bce with top-level menus 1 and 2
+	  in addition to the existing menu 8.
+
+	+ correct description for DA response 24; it denotes VT320.
+
+	+ correct highlighting for French NRC mapping; "`" is not mapped.
+
+	+ add port-files from FreeBSD for test-builds.
+
+	+ add highlighting information for VT320 Portuguese NRC mapping.
+
+	+ add highlighting information for VT220 DEC Supplemental NRC mapping.
+
+	+ updated configure-macros to add msys changes from ncurses 20130907.
+
+	+ update config.guess, config.sub
 
 20130818
 	+ modify character-sets screens to optionally highlight the characters
