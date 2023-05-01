@@ -1,5 +1,0 @@
-#!/bin/sh
-make||exit
-export XTERM_PROG=/usr/build/xterm/xterm-354/xterm
-rm -f *.log *.out
-vt525 -e ./vttest -l
