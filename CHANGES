@@ -1,5 +1,64 @@
--- $Id: CHANGES,v 1.136 2011/12/10 15:19:15 tom Exp $
+-- $Id: CHANGES,v 1.157 2012/05/06 19:52:00 tom Exp $
 -------------------------------------------------------------------------------
+
+20120506
+	+ build-fix in case compiler does not recognize gcc's __attribute__.
+
+	+ modify vt420 rectangle menu to allow testing with applications which
+	  misreport their operating level, e.g., Reflection which states that
+	  it is a vt340.  The menu title shows "should not work" if the
+	  terminal says its operating level is below VT4xx.
+
+	+ add menu-entries for DECOM/DECLRMM to vt420 rectangle menu.
+
+	+ add menu-entries for DECOM/DECLRMM to vt420 cursor-movement menu.
+
+	+ add menu-entries for DECOM/DECLRMM to vt420 editing-controls menu.
+
+	+ add HPR and VPR test-screens.
+
+	+ add vt520 cursor-movement menu; most of the vt520's new features were
+	  based on ISO-6429 but allow for DECOM and DECLRMM interactions.
+
+	+ implement DECSCPP and DECSLPP test-screens.
+
+	+ add test-screen for DECNCSM.
+
+	+ add "-s" command-line option to initialize the time-delay feature.
+
+	+ add setup-menu feature to control whether a time delay is added in
+	  selected repeated cursor-movement and scrolling operations to make
+	  their behavior easier to see.
+
+	+ correct scanning of DECCKSR response; result is hexadecimal not
+	  decimal.
+
+	+ modify menu functions to provide for multipage menus, e.g., in the
+	  character set choices for vt420 and vt520 on a 24-line screen.
+
+	+ modify tests related to left/right margins to allow color to be set,
+	  as xterm-feature.
+
+	+ add test-screen for index/reverse index with left/right margins.
+
+	+ ensure that status-line is turned off when exiting status-line test.
+
+	+ add test-screen for VT420 & up for ASCII formatting controls with
+	  margins.
+
+	+ modify DECFI/DECBI tests to work with margins.
+
+	+ add menu entries for setting/showing the top/bottom and left/right
+	  margins, to modify the behavior of the DECIC/DECDC tests.
+
+	+ add menu entries for setting/showing DECLRMM state, needed for
+	  DECIC/DECDC tests.
+
+	+ change mnemomic DECVSSM to DECLRMM to reflect the latter's usage in
+	  vt420 and vt510 manuals.
+
+	+ modify DECRQSS test for DECSCUSR to show if the response is as
+	  expected.
 
 20111210
 	+ modify mouse menu's selection of coordinate mode to include xterm's

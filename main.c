@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.94 2011/12/06 10:17:57 tom Exp $ */
+/* $Id: main.c,v 1.104 2012/05/04 20:57:12 tom Exp $ */
 
 /*
                                VTTEST.C
@@ -42,17 +42,18 @@
 #include <esc.h>
 
 /* *INDENT-EQLS* */
-FILE *log_fp     = 0;
+FILE *log_fp    = 0;
 int brkrd;
 int reading;
 int log_disabled = FALSE;
-int max_lines    = 24;
-int max_cols     = 132;
-int min_cols     = 80;
-int input_8bits  = FALSE;
+int max_lines   = 24;
+int max_cols    = 132;
+int min_cols    = 80;
+int input_8bits = FALSE;
 int output_8bits = FALSE;
-int tty_speed    = DEFAULT_SPEED;  /* nominal speed, for padding */
-int use_padding  = FALSE;
+int slow_motion = FALSE;
+int tty_speed   = DEFAULT_SPEED;  /* nominal speed, for padding */
+int use_padding = FALSE;
 jmp_buf intrenv;
 
 static char empty[1];
@@ -61,7 +62,8 @@ static char *current_menu = empty;
 static void
 usage(void)
 {
-  fprintf(stderr, "Usage: vttest [-l] [-p] [-8] [-f font] [24x80.132]\n");
+  fprintf(stderr,
+          "Usage: vttest [-l] [-p] [-s] [-8] [-f font] [24x80.132]\n");
   exit(EXIT_FAILURE);
 }
 
@@ -106,6 +108,9 @@ main(int argc, char *argv[])
           break;
         case 'p':
           use_padding = TRUE;
+          break;
+        case 's':
+          slow_motion = TRUE;
           break;
         case '8':
           output_8bits = TRUE;
@@ -355,14 +360,16 @@ tst_movements(MENU_ARGS)
         /* simple wrapping */
         __(cup(region, width), printf("%c%c", on_right[i - 1], on_left[i]));
         /* backspace at right margin */
-        __(cup(region + 1, width), printf("%c\010 %c", on_left[i], on_right[i]));
+        __(cup(region + 1, width), printf("%c%c %c",
+                                          on_left[i], BS, on_right[i]));
         printf("\n");
         break;
       case 2:
         /* tab to right margin */
-        __(cup(region + 1, width), printf("%c\010\010\011\011%c",
-                                          on_left[i], on_right[i]));
-        __(cup(region + 1, 2), printf("\010%c\n", on_left[i]));
+        __(cup(region + 1, width), printf("%c%c%c%c%c%c",
+                                          on_left[i], BS, BS,
+                                          TAB, TAB, on_right[i]));
+        __(cup(region + 1, 2), printf("%c%c\n", BS, on_left[i]));
         break;
       default:
         /* newline at right margin */
@@ -390,13 +397,13 @@ tst_movements(MENU_ARGS)
   println("A B C D E F G H I");
   for (i = 1; i < 10; i++) {
     printf("%c", '@' + i);
-    do_csi("2\010C");   /* Two forward, one backspace */
+    do_csi("2%cC", BS);   /* Two forward, one backspace */
   }
   println("");
   /* Now put CR in CUF sequence. */
   printf("A ");
   for (i = 2; i < 10; i++)
-    printf("%s\015%dC%c", csi_output(), 2 * i - 2, '@' + i);
+    printf("%s%c%dC%c", csi_output(), CR, 2 * i - 2, '@' + i);
   println("");
   /* Now put VT in CUU sequence. */
   rm("20");
@@ -476,7 +483,7 @@ tst_screen(MENU_ARGS)
      - TBC     (Tabulation Clear)
      - HTS     (Horizontal Tabulation Set)
      - SM RM   (Set/Reset mode): - 80/132 chars
-     .                           - Origin: Realtive/absolute
+     .                           - Origin: Relative/absolute
      .                           - Scroll: Smooth/jump
      .                           - Wraparound
      - SGR     (Select Graphic Rendition)
@@ -527,7 +534,7 @@ tst_screen(MENU_ARGS)
   tbc(2);       /* no-op */
   cup(1, 1);
   for (col = 1; col <= min_cols - 2; col += 6)
-    printf("\t*");
+    printf("%c*", TAB);
   cup(2, 2);
   for (col = 2; col <= min_cols - 2; col += 6)
     printf("     *");
@@ -544,8 +551,8 @@ tst_screen(MENU_ARGS)
     ed(2);      /* VT100 clears screen on SM3/RM3, but not obviously, so... */
     cup(1, 1);
     tbc(3);
-    for (col = 1; col <= max_cols; col += 8) {
-      cuf(8);
+    for (col = 1; col <= max_cols; col += TABWIDTH) {
+      cuf(TABWIDTH);
       hts();
     }
     cup(1, 1);
@@ -766,8 +773,8 @@ tst_doublesize(MENU_ARGS)
   /* Set vanilla tabs for next test */
   cup(1, 1);
   tbc(3);
-  for (col = 1; col <= max_cols; col += 8) {
-    cuf(8);
+  for (col = 1; col <= max_cols; col += TABWIDTH) {
+    cuf(TABWIDTH);
     hts();
   }
   deccolm(FALSE);
@@ -905,7 +912,7 @@ tst_insdel(MENU_ARGS)
     println("below:");
     println("");
     for (i = 'Z'; i >= 'A'; i--) {
-      printf("%c\010", i);
+      printf("%c%c", i, BS);
       ich(2);
     }
     cup(10, 1);
@@ -1417,67 +1424,124 @@ pop_menu(const char *saved)
   current_menu = (char *) saved;
 }
 
+#define end_of_menu(table, number) \
+        (table[number].description[0] == '\0')
+
+static void
+show_entry(MENU *table, int number)
+{
+  printf("          %d%c %s\n", number,
+         (table[number].dispatch == not_impl) ? '*' : '.',
+         table[number].description);
+}
+
+static int
+next_menu(MENU *table, int top, int size)
+{
+  int last;
+  int next = top + size;
+  for (last = top; last <= next && !end_of_menu(table, last); ++last) {
+    ;
+  }
+  return (last >= next) ? next : top;
+}
+
+static int
+prev_menu(int top, int size)
+{
+  return (top > 1) ? (top - size) : top;
+}
+
 int
 menu(MENU *table)
 {
   int i, tablesize, choice;
   char c;
   char storage[BUFSIZ];
+  int pagesize = max_lines - 7 - TITLE_LINE;
+  int pagetop = 1;
+  int redraw = FALSE;
 
-  println("");
   tablesize = 0;
-  for (i = 0; table[i].description[0] != '\0'; i++) {
-    printf("          %d%c %s\n", i,
-           table[i].dispatch == not_impl ? '*' : '.', table[i].description);
+  for (i = 0; !end_of_menu(table, i); i++) {
     tablesize++;
   }
   tablesize--;
 
-  printf("\n          Enter choice number (0 - %d): ", tablesize);
   for (;;) {
-    char *s = storage;
-    inputline(s);
-    choice = 0;
-    while ((c = *s++) != '\0') {
-      if (c == '*') {
-        choice = -1;
+    vt_move(6, 1);
+    vt_clear(0);
+
+    println("");
+    show_entry(table, 0);
+    for (i = 0; i < pagesize; i++) {
+      int j = pagetop + i;
+      if (end_of_menu(table, j))
         break;
-      } else if (c >= '0' && c <= '9') {
-        choice = 10 * choice + c - '0';
-      } else {
-        choice = tablesize + 1;
-        break;
-      }
+      show_entry(table, pagetop + i);
     }
 
-    if (choice < 0) {
-      for (choice = 0; choice <= tablesize; choice++) {
+    printf("\n          Enter choice number (0 - %d): ", tablesize);
+    for (;;) {
+      char *s = storage;
+      inputline(s);
+      choice = 0;
+      redraw = FALSE;
+      while ((c = *s++) != '\0') {
+        if (c == '*') {
+          choice = -1;
+          break;
+        } else if (c == '?') {
+          redraw = TRUE;
+          break;
+        } else if (tablesize > pagesize && c == 'n') {
+          pagetop = next_menu(table, pagetop, pagesize);
+          redraw = TRUE;
+          break;
+        } else if (tablesize > pagesize && c == 'p') {
+          pagetop = prev_menu(pagetop, pagesize);
+          redraw = TRUE;
+          break;
+        } else if (c >= '0' && c <= '9') {
+          choice = 10 * choice + c - '0';
+        } else {
+          choice = tablesize + 1;
+          break;
+        }
+      }
+
+      if (redraw)
+        break;
+
+      if (choice < 0) {
+        for (choice = 0; choice <= tablesize; choice++) {
+          vt_clear(2);
+          if (table[choice].dispatch != 0) {
+            const char *save = push_menu(choice);
+            const char *name = table[choice].description;
+            if (LOG_ENABLED)
+              fprintf(log_fp, "Menu %s: %s\n", current_menu, name);
+            if ((*table[choice].dispatch) (name) == MENU_HOLD)
+              holdit();
+            pop_menu(save);
+          }
+        }
+        return 1;
+      } else if (choice <= tablesize) {
         vt_clear(2);
         if (table[choice].dispatch != 0) {
           const char *save = push_menu(choice);
           const char *name = table[choice].description;
           if (LOG_ENABLED)
             fprintf(log_fp, "Menu %s: %s\n", current_menu, name);
-          if ((*table[choice].dispatch) (name) == MENU_HOLD)
+          if ((*table[choice].dispatch) (name) != MENU_NOHOLD)
             holdit();
           pop_menu(save);
         }
+        return (table[choice].dispatch != 0);
       }
-      return 1;
-    } else if (choice <= tablesize) {
-      vt_clear(2);
-      if (table[choice].dispatch != 0) {
-        const char *save = push_menu(choice);
-        const char *name = table[choice].description;
-        if (LOG_ENABLED)
-          fprintf(log_fp, "Menu %s: %s\n", current_menu, name);
-        if ((*table[choice].dispatch) (name) != MENU_NOHOLD)
-          holdit();
-        pop_menu(save);
-      }
-      return (table[choice].dispatch != 0);
+      printf("          Bad choice, try again: ");
     }
-    printf("          Bad choice, try again: ");
   }
 }
 
@@ -1615,6 +1679,15 @@ skip_digits(char *src)
   return (base == src) ? 0 : src;
 }
 
+char *
+skip_xdigits(char *src)
+{
+  char *base = src;
+  while (*src != '\0' && isxdigit(CharOf(*src)))
+    src++;
+  return (base == src) ? 0 : src;
+}
+
 const char *
 skip_digits_2(const char *src)
 {
@@ -1725,7 +1798,7 @@ my_vfprintf(FILE *fp, va_list ap, const char *fmt)
  * Show a test-result, optionally logging it as well.
  */
 void
-show_result(const char *fmt, ...)
+show_result(const char *fmt,...)
 {
   va_list ap;
 
@@ -1741,6 +1814,20 @@ show_result(const char *fmt, ...)
     my_vfprintf(log_fp, ap, fmt);
     va_end(ap);
     fputc('\n', log_fp);
+  }
+}
+
+/*
+ * Use this to make some complex stuff (such as scrolling) slow enough to see.
+ */
+void
+slowly(void)
+{
+  if (slow_motion) {
+#ifdef HAVE_USLEEP
+    fflush(stdout);
+    zleep(100);
+#endif
   }
 }
 

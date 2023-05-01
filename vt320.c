@@ -1,10 +1,11 @@
-/* $Id: vt320.c,v 1.21 2011/05/06 20:46:55 tom Exp $ */
+/* $Id: vt320.c,v 1.28 2012/04/25 10:51:29 tom Exp $ */
 
 /*
  * Reference:  VT330/VT340 Programmer Reference Manual (EK-VT3XX-TP-001)
  */
 #include <vttest.h>
 #include <ttymodes.h>
+#include <draw.h>
 #include <esc.h>
 
 static void
@@ -438,7 +439,7 @@ any_RQM(MENU_ARGS, RQM_DATA * table, int tablesize, int private)
 
     if (++row >= max_lines - 3) {
       restore_ttymodes();
-      vt_move(max_lines - 1, 1);
+      cup(max_lines - 1, 1);
       holdit();
       vt_clear(2);
       vt_move(row = 2, 1);
@@ -557,7 +558,7 @@ tst_DEC_DECRPM(MENU_ARGS)
     DATA( DECNKM,  3 /* numeric keypad */),
     DATA( DECBKM,  3 /* backarrow key */),
     DATA( DECKBUM, 3 /* keyboard usage */),
-    DATA( DECVSSM, 4 /* vertical split */),
+    DATA( DECLRMM, 4 /* left/right margin mode */),
     DATA( DECXRLM, 3 /* transmit rate linking */),
     DATA( DECKPM,  4 /* keyboard positioning */),
     DATA( DECNCSM, 5 /* no clearing screen on column change */),
@@ -615,10 +616,11 @@ tst_DECRPM(MENU_ARGS)
  * however I see "DCS 1 $ r" on a real VT420, consistently.
  */
 int
-any_decrqss(const char *msg, const char *func)
+any_decrqss2(const char *msg, const char *func, const char *expected)
 {
   char *report;
   const char *show;
+  char buffer[80];
 
   vt_move(1, 1);
   printf("Testing DECRQSS: %s\n", msg);
@@ -628,11 +630,20 @@ any_decrqss(const char *msg, const char *func)
 
   decrqss(func);
   report = get_reply();
+
+  reset_decstbm();
+  reset_decslrm();
+
   vt_move(3, 10);
   chrprint(report);
   switch (parse_decrqss(report, func)) {
   case 1:
-    show = "ok (valid request)";
+    if (expected && strcmp(expected, report)) {
+      sprintf(buffer, "ok (expect '%s', actual '%s')", expected, report);
+      show = buffer;
+    } else {
+      show = "ok (valid request)";
+    }
     break;
   case 0:
     show = "invalid request";
@@ -646,6 +657,12 @@ any_decrqss(const char *msg, const char *func)
   restore_ttymodes();
   vt_move(max_lines - 1, 1);
   return MENU_HOLD;
+}
+
+int
+any_decrqss(const char *msg, const char *func)
+{
+  return any_decrqss2(msg, func, (const char *) 0);
 }
 
 static int
@@ -684,7 +701,7 @@ rpt_DECSSDT(MENU_ARGS)
   return any_decrqss(the_title, "$~");
 }
 
-static int
+int
 rpt_DECSTBM(MENU_ARGS)
 {
   return any_decrqss(the_title, "r");
@@ -843,6 +860,91 @@ tst_vt320_reports(MENU_ARGS)
 
 /* vt340/vt420 & up */
 static int
+tst_DECSCPP(MENU_ARGS)
+{
+  static const int table[] =
+  {-1, 80, 80, 132};
+  size_t n;
+  char temp[80];
+  int last = max_lines - 4;
+
+  for (n = 0; n < TABLESIZE(table); ++n) {
+    int width = (table[n] < 0) ? min_cols : table[n];
+
+    vt_clear(2);
+    decaln();
+    decscpp(table[n]);
+    vt_move(last, 1);
+    ruler(last, width);
+    vt_clear(0);
+    sprintf(temp, "Screen should be filled (%d of %d columns)", min_cols, width);
+    println(temp);
+    holdit();
+
+  }
+  decscpp(-1);
+  vt_move(last, 1);
+  vt_clear(0);
+  println("Screen is reset to original width");
+
+  return MENU_HOLD;
+}
+
+static int
+tst_DECSLPP(MENU_ARGS)
+{
+  static const int table[] =
+  {24, 25, 36, 48, 72, 144};
+  size_t n;
+  char temp[80];
+  int last = max_lines - 4;
+
+  for (n = 0; n < TABLESIZE(table); ++n) {
+    int high = (table[n] < 0) ? min_cols : table[n];
+
+    vt_clear(2);
+    decaln();
+    decslpp(table[n]);
+    vt_move(last, 1);
+    ruler(last, min_cols);
+    vt_clear(0);
+    sprintf(temp, "Screen should be filled (%d of %d rows)", max_lines, high);
+    println(temp);
+    holdit();
+
+  }
+  decslpp(max_lines);
+  vt_move(last, 1);
+  vt_clear(0);
+  println("Screen is reset to original height");
+
+  return MENU_HOLD;
+}
+
+static int
+tst_PageFormat(MENU_ARGS)
+{
+  /* *INDENT-OFF* */
+  static MENU my_menu[] = {
+      { "Exit",                                              0 },
+      { "Test set columns per page (DECSCPP)",               tst_DECSCPP },
+      { "Test set lines per page (DECSLPP)",                 tst_DECSLPP },
+      { "",                                                  0 }
+    };
+  /* *INDENT-ON* */
+
+  do {
+    vt_clear(2);
+    __(title(0), printf("Page Format Tests"));
+    __(title(2), println("Choose test type:"));
+  } while (menu(my_menu));
+  return MENU_NOHOLD;
+}
+
+/******************************************************************************/
+
+/* vt340/vt420 & up */
+static int
 tst_PageMovement(MENU_ARGS)
 {
   /* *INDENT-OFF* */
@@ -898,6 +1000,7 @@ tst_vt320(MENU_ARGS)
       { "Exit",                                              0 },
       { "Test VT220 features",                               tst_vt220 },
       { "Test cursor-movement",                              tst_vt320_cursor },
+      { "Test page-format controls",                         tst_PageFormat },
       { "Test page-movement controls",                       tst_PageMovement },
       { "Test reporting functions",                          tst_vt320_reports },
       { "Test screen-display functions",                     tst_vt320_screen },

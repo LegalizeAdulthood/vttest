@@ -1,4 +1,4 @@
-/* $Id: vttest.h,v 1.84 2011/12/07 22:17:59 tom Exp $ */
+/* $Id: vttest.h,v 1.96 2012/05/06 19:32:34 tom Exp $ */
 
 #ifndef VTTEST_H
 #define VTTEST_H 1
@@ -129,13 +129,17 @@ please fix me
 
 extern FILE *log_fp;
 extern int brkrd;
+extern int do_colors;
 extern int input_8bits;
 extern int log_disabled;
+extern int lrmm_flag;
 extern int max_cols;
 extern int max_lines;
 extern int min_cols;
+extern int origin_mode;
 extern int output_8bits;
 extern int reading;
+extern int slow_motion;
 extern int tty_speed;
 extern int use_padding;
 extern jmp_buf intrenv;
@@ -165,6 +169,7 @@ extern jmp_buf intrenv;
 #define TABLESIZE(table) (int)(sizeof(table)/sizeof(table[0]))
 
 #define DEFAULT_SPEED 9600
+#define TABWIDTH 8
 
 #define STR_ENABLE(flag)     ((flag) ? "Disable" : "Enable")
 #define STR_ENABLED(flag)    ((flag) ? "enabled" : "disabled")
@@ -174,7 +179,13 @@ extern jmp_buf intrenv;
 #define __attribute__(p)  /* nothing */
 #endif
 
-#define GCC_PRINTFLIKE(fmt,var) __attribute__((format(printf,fmt,var)))
+#ifndef GCC_PRINTFLIKE
+#define GCC_PRINTFLIKE(fmt,var)   /* nothing */
+#endif
+
+#ifndef GCC_UNUSED
+#define GCC_UNUSED  /* nothing */
+#endif
 
 /* my SunOS 4.1.x doesn't have prototyped headers */
 #if defined(__GNUC__) && defined(sun) && !defined(__SVR4)
@@ -220,6 +231,17 @@ typedef struct {
 
 #define TITLE_LINE  3
 
+#define WHITE_ON_BLUE   "0;37;44"
+#define WHITE_ON_GREEN  "0;37;42"
+#define YELLOW_ON_BLACK "0;33;40"
+#define BLINK_REVERSE   "0;5;7"
+
+extern char origin_mode_mesg[80];
+extern char lrmm_mesg[80];
+extern char lr_marg_mesg[80];
+extern char tb_marg_mesg[80];
+extern char txt_override_color[80];
+
 extern RETSIGTYPE onbrk(SIG_ARGS);
 extern RETSIGTYPE onterm(SIG_ARGS);
 extern char *skip_csi(char *input);
@@ -227,6 +249,7 @@ extern char *skip_dcs(char *input);
 extern char *skip_digits(char *src);
 extern char *skip_prefix(const char *prefix, char *input);
 extern char *skip_ss3(char *input);
+extern char *skip_xdigits(char *src);
 extern const char *parse_Sdesig(const char *source, int *offset);
 extern const char *skip_csi_2(const char *input);
 extern const char *skip_dcs_2(const char *input);
@@ -237,6 +260,7 @@ extern int any_DSR(MENU_ARGS, const char *text, void (*explain) (char *report));
 extern int any_RQM(MENU_ARGS, RQM_DATA * table, int tablesize, int private);
 extern int any_decrqpsr(MENU_ARGS, int Ps);
 extern int any_decrqss(const char *msg, const char *func);
+extern int any_decrqss2(const char *msg, const char *func, const char *expected);
 extern int bug_a(MENU_ARGS);
 extern int bug_b(MENU_ARGS);
 extern int bug_c(MENU_ARGS);
@@ -249,11 +273,16 @@ extern int bug_w(MENU_ARGS);
 extern int chrprint2(const char *s, int row, int col);
 extern int conv_to_utf32(unsigned *target, const char *source, unsigned limit);
 extern int conv_to_utf8(unsigned char *target, unsigned source, unsigned limit);
+extern int get_bottom_margin(int n);
+extern int get_left_margin(void);
 extern int get_level(void);
+extern int get_right_margin(void);
+extern int get_top_margin(void);
 extern int main(int argc, char *argv[]);
 extern int menu(MENU *table);
 extern int not_impl(MENU_ARGS);
 extern int parse_decrqss(char *report, const char *func);
+extern int rpt_DECSTBM(MENU_ARGS);
 extern int scan_any(char *str, int *pos, int toc);
 extern int scanto(const char *str, int *pos, int toc);
 extern int set_DECRPM(int level);
@@ -263,6 +292,16 @@ extern int strip_suffix(char *src, const char *suffix);
 extern int strip_terminator(char *src);
 extern int terminal_id(void);
 extern int title(int offset);
+extern int toggle_DECOM(MENU_ARGS);
+extern int toggle_LRMM(MENU_ARGS);
+extern int toggle_SLRM(MENU_ARGS);
+extern int toggle_STBM(MENU_ARGS);
+extern int toggle_color_mode(MENU_ARGS);
+extern int tst_CBT(MENU_ARGS);
+extern int tst_CHA(MENU_ARGS);
+extern int tst_CHT(MENU_ARGS);
+extern int tst_CNL(MENU_ARGS);
+extern int tst_CPL(MENU_ARGS);
 extern int tst_DECRPM(MENU_ARGS);
 extern int tst_DECSTR(MENU_ARGS);
 extern int tst_DSR_cursor(MENU_ARGS);
@@ -270,13 +309,18 @@ extern int tst_DSR_keyboard(MENU_ARGS);
 extern int tst_DSR_locator(MENU_ARGS);
 extern int tst_DSR_printer(MENU_ARGS);
 extern int tst_DSR_userkeys(MENU_ARGS);
+extern int tst_HPA(MENU_ARGS);
+extern int tst_HPR(MENU_ARGS);
 extern int tst_SD(MENU_ARGS);
 extern int tst_SRM(MENU_ARGS);
 extern int tst_SU(MENU_ARGS);
+extern int tst_VPA(MENU_ARGS);
+extern int tst_VPR(MENU_ARGS);
 extern int tst_bugs(MENU_ARGS);
 extern int tst_characters(MENU_ARGS);
 extern int tst_colors(MENU_ARGS);
 extern int tst_doublesize(MENU_ARGS);
+extern int tst_ecma48_curs(MENU_ARGS);
 extern int tst_ecma48_misc(MENU_ARGS);
 extern int tst_insdel(MENU_ARGS);
 extern int tst_keyboard(MENU_ARGS);
@@ -305,6 +349,7 @@ extern int tst_vt320_reports(MENU_ARGS);
 extern int tst_vt320_screen(MENU_ARGS);
 extern int tst_vt420(MENU_ARGS);
 extern int tst_vt420_DECRQSS(MENU_ARGS);
+extern int tst_vt420_cursor(MENU_ARGS);
 extern int tst_vt420_device_status(MENU_ARGS);
 extern int tst_vt420_report_presentation(MENU_ARGS);
 extern int tst_vt420_reports(MENU_ARGS);
@@ -318,15 +363,23 @@ extern void chrprint(const char *s);
 extern void default_level(void);
 extern void do_scrolling(void);
 extern void enable_logging(void);
+extern void finish_vt420_cursor(MENU_ARGS);
 extern void initterminal(int pn);
+extern void menus_vt420_cursor(void);
+extern void print_chr(int c);
+extern void print_str(const char *s);
 extern void reset_level(void);
 extern void restore_level(VTLEVEL *save);
 extern void save_level(VTLEVEL *save);
 extern void scs_graphics(void);
 extern void scs_normal(void);
+extern void set_colors(const char *value);
 extern void setup_softchars(const char *filename);
+extern void setup_vt420_cursor(MENU_ARGS);
 extern void show_mousemodes(void);
 extern void show_result(const char *fmt,...) GCC_PRINTFLIKE(1,2);
+extern void slowly(void);
+extern void test_with_margins(int enable);
 extern void vt_clear(int code);
 extern void vt_el(int code);
 extern void vt_hilite(int flag);

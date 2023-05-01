@@ -1,4 +1,4 @@
-/* $Id: vt420.c,v 1.82 2011/07/05 21:43:54 tom Exp $ */
+/* $Id: vt420.c,v 1.160 2012/05/06 14:25:44 tom Exp $ */
 
 /*
  * Reference:  Installing and Using the VT420 Video Terminal (North American
@@ -9,20 +9,432 @@
 #include <esc.h>
 #include <ttymodes.h>
 
-#define WHITE_ON_BLUE   "0;37;44"
-#define WHITE_ON_GREEN  "0;37;42"
-#define YELLOW_ON_BLACK "0;33;40"
-#define BLINK_REVERSE   "0;5;7"
-
 typedef struct {
   int mode;
   char *name;
 } MODES;
 
+typedef enum {
+  marNone = -1,
+  marReset = 0,
+  marFirst = 1,
+  marLast = 2,
+  marMiddle = 3,
+  marEnd
+} MARS;
+
+int origin_mode = FALSE;
+char txt_override_color[80];
+
 static int do_lines = FALSE;
-static int do_colors = FALSE;
+static int use_colors = FALSE;
 
 /******************************************************************************/
+
+static void
+reset_colors(void)
+{
+  if (use_colors) {
+    sgr("0");
+    use_colors = FALSE;
+    if (LOG_ENABLED) {
+      fprintf(log_fp, "Note: turned off colors\n");
+    }
+  }
+}
+
+void
+set_colors(const char *value)
+{
+  if (do_colors) {
+    if (value == 0)
+      value = "0";
+    sgr(value);
+    use_colors = strcmp(value, "0");
+    if (LOG_ENABLED) {
+      fprintf(log_fp, "Note: turned %s colors\n", use_colors ? "on" : "off");
+    }
+  }
+}
+
+/******************************************************************************/
+
+int lrmm_flag;
+
+static MARS lr_marg_flag;
+static int lr_marg1, lr_marg2;
+static MARS tb_marg_flag;
+static int tb_marg1, tb_marg2;
+
+char origin_mode_mesg[80];
+char lrmm_mesg[80];
+char lr_marg_mesg[80];
+char tb_marg_mesg[80];
+
+int
+toggle_LRMM(MENU_ARGS)
+{
+  lrmm_flag = !lrmm_flag;
+  if (lrmm_flag)
+    sm("?69");
+  else
+    rm("?69");
+  return MENU_NOHOLD;
+}
+
+/*
+ * The message tells what margins will be used in the test, not what their
+ * value is while drawing the menu (since actually setting margins would
+ * interfere with the menu).
+ */
+int
+toggle_STBM(MENU_ARGS)
+{
+  switch (++tb_marg_flag) {
+  default:
+    tb_marg_flag = marReset;
+    tb_marg1 = 0;
+    tb_marg2 = 0;
+    strcpy(tb_marg_mesg, "Top/Bottom margins are reset");
+    break;
+  case marFirst:
+    tb_marg1 = 1;
+    tb_marg2 = max_lines / 2;
+    strcpy(tb_marg_mesg, "Top/Bottom margins are set to top half of screen");
+    break;
+  case marLast:
+    tb_marg1 = max_lines / 2;
+    tb_marg2 = max_lines;
+    strcpy(tb_marg_mesg,
+           "Top/Bottom margins are set to bottom half of screen");
+    break;
+  case marMiddle:
+    tb_marg1 = max_lines / 4;
+    tb_marg2 = (3 * max_lines) / 4;
+    strcpy(tb_marg_mesg,
+           "Top/Bottom margins are set to middle half of screen");
+    break;
+  }
+  return MENU_NOHOLD;
+}
+
+int
+toggle_SLRM(MENU_ARGS)
+{
+  switch (++lr_marg_flag) {
+  default:
+    lr_marg_flag = marReset;
+    lr_marg1 = 0;
+    lr_marg2 = 0;
+    strcpy(lr_marg_mesg, "Left/right margins are reset");
+    break;
+  case marFirst:
+    lr_marg1 = 1;
+    lr_marg2 = min_cols / 2;
+    strcpy(lr_marg_mesg, "Left/right margins are set to left half of screen");
+    break;
+  case marLast:
+    lr_marg1 = (min_cols / 2) + 1;
+    lr_marg2 = min_cols;
+    strcpy(lr_marg_mesg,
+           "Left/right margins are set to right half of screen");
+    break;
+  case marMiddle:
+    lr_marg1 = (min_cols / 4) + 1;
+    lr_marg2 = (3 * min_cols) / 4;
+    strcpy(lr_marg_mesg,
+           "Left/right margins are set to middle half of screen");
+    break;
+  }
+  return MENU_NOHOLD;
+}
+
+int
+get_top_margin(void)
+{
+  int result = (tb_marg1 ? tb_marg1 : 1);
+  if (origin_mode)
+    result = 1;
+  return result;
+}
+
+int
+get_left_margin(void)
+{
+  int result = ((lrmm_flag && lr_marg1) ? lr_marg1 : 1);
+  if (origin_mode)
+    result = 1;
+  return result;
+}
+
+int
+get_right_margin(void)
+{
+  int result = ((lrmm_flag && lr_marg2) ? lr_marg2 : min_cols);
+  if (origin_mode) {
+    result = (((lrmm_flag && lr_marg2) ? lr_marg2 : min_cols) -
+              ((lrmm_flag && lr_marg1) ? lr_marg1 : 1) +
+              1);
+  }
+  return result;
+}
+
+int
+get_bottom_margin(int n)
+{
+  int result = (tb_marg2 ? tb_marg2 : (n));
+  if (origin_mode) {
+    result = ((tb_marg2 ? tb_marg2 : max_lines) -
+              (tb_marg1 ? tb_marg1 : 1) +
+              1);
+  }
+  return result;
+}
+
+static int
+get_hold_col(void)
+{
+  int hold_col = 1;
+
+  if (lrmm_flag) {
+    switch (lr_marg_flag) {
+    default:
+      break;
+    case marFirst:
+      hold_col = get_right_margin() + 1;
+      break;
+    case marMiddle:
+      hold_col = get_left_margin();
+      break;
+    }
+  }
+  return hold_col;
+}
+
+/*
+ * Return a good row value at which to print a prompt, avoiding most overwrite
+ * of test-results.
+ */
+static int
+get_hold_row(void)
+{
+  int hold_row;
+
+  switch (tb_marg_flag) {
+  default:
+    hold_row = max_lines / 2;
+    break;
+  case marFirst:
+    hold_row = (origin_mode
+                ? (max_lines - 4)
+                : (get_bottom_margin(max_lines) + 1));
+    break;
+  case marMiddle:
+    hold_row = (max_lines > 16) ? (max_lines - 4) : (max_lines / 2);
+    break;
+  case marLast:
+    hold_row = 1;
+    break;
+  }
+  return hold_row;
+}
+
+static int
+hold_clear(void)
+{
+  int result;
+
+  switch (tb_marg_flag) {
+  default:
+    result = 0;
+    break;
+  case marFirst:
+    result = 1;
+    break;
+  case marReset:
+  case marLast:
+    result = 0;
+    break;
+  }
+
+  return result;
+}
+
+/*
+ * Prompt as part of a multi-step test, temporarily resetting DECOM so we can
+ * put the prompt anywhere.
+ */
+static void
+special_prompt(int row, int col, const char *msg)
+{
+  if (origin_mode)
+    decom(FALSE);
+
+  vt_move(row, col);
+  if (msg != 0) {
+    printf("%s", msg);
+    vt_move(row + 1, col);
+  }
+  holdit();
+
+  if (origin_mode)
+    decom(TRUE);
+}
+
+/*
+ * Fill area outside margins with given character, to help show that changes
+ * are limited to the area within margins.
+ */
+static void
+fill_outside(int ch)
+{
+  int row, col;
+
+  if (LOG_ENABLED) {
+    fprintf(log_fp, "Note: filling outside margins with '%c'\n", ch);
+  }
+
+  set_colors("0");
+
+  if (origin_mode)
+    decom(FALSE);
+
+  for (row = 1; row <= max_lines; ++row) {
+    if (row < tb_marg1 ||
+        row > tb_marg2 ||
+        lr_marg1 > 1 ||
+        lr_marg2 < min_cols) {
+      int first = 1;
+      int next = 0;
+
+      for (col = 1; col <= min_cols; ++col) {
+        if ((lrmm_flag && lr_marg1 && col < lr_marg1) ||
+            (lrmm_flag && lr_marg2 && col > lr_marg2) ||
+            (tb_marg1 != 0 && row < tb_marg1) ||
+            (tb_marg2 != 0 && row > tb_marg2)) {
+          if (first || (next != col)) {
+            vt_move(row, col);
+            first = 0;
+            next = col + 1;
+          }
+          putchar(ch);
+          ++next;
+        }
+      }
+    }
+  }
+
+  if (origin_mode)
+    decom(TRUE);
+}
+
+void
+test_with_margins(int enable)
+{
+  switch (enable) {
+  case 1:
+    fill_outside('.');
+    /* FALLTHRU */
+  case 2:
+    decstbm(tb_marg1, tb_marg2);
+    decslrm(lr_marg1, lr_marg2);
+    if (origin_mode)
+      decom(TRUE);
+    break;
+  default:
+    decstbm(0, 0);
+    decslrm(0, 0);
+    if (origin_mode)
+      decom(FALSE);
+    break;
+  }
+}
+
+/*
+ * Fill the area within margins with a test pattern.  The top line is numbers,
+ * the bottom line is alphas.  In between, use asterisks.
+ */
+static void
+fill_margins(void)
+{
+  int top = get_top_margin();
+  int bot = get_bottom_margin(max_lines);
+  int lft = get_left_margin();
+  int rgt = get_right_margin();
+  int row, col;
+
+  set_colors(WHITE_ON_BLUE);
+
+  decawm(FALSE);  /* do this to allow writing in lower-right */
+  for (row = top; row <= bot; ++row) {
+    cup(row, lft);
+    for (col = lft; col <= rgt; ++col) {
+      if (row == top) {
+        putchar((col - lft) % 10 + '0');
+      } else if (row == bot) {
+        putchar((col - lft) % 26 + 'a');
+      } else {
+        putchar('*');
+      }
+    }
+  }
+  decawm(TRUE);
+}
+
+static void
+setup_rectangle(BOX *box, int last)
+{
+  box->top = 5;
+  box->left = 5;
+  box->right = min_cols - 5;
+  box->bottom = max_lines - 10;
+
+  if (origin_mode) {
+    int top = get_top_margin();
+    int lft = get_left_margin();
+    int rgt = get_right_margin();
+    int bot = get_bottom_margin(last - 1);
+    int wide = (rgt - lft + 1);
+    int high = (bot - top + 1);
+
+    if (high > 20) {
+      box->top = 5;
+      box->bottom = high - 10;
+    } else {
+      box->top = 2;
+      box->bottom = high - 2;
+    }
+
+    if (wide > 20) {
+      box->left = 5;
+      box->right = wide - 5;
+    } else {
+      box->left = 2;
+      box->right = wide - 2;
+    }
+  }
+}
+
+#define DATA(name,level) { name, #name, level }
+
+static int
+show_DECLRMM(MENU_ARGS)
+{
+  /* *INDENT-OFF* */
+  RQM_DATA dec_modes[] = { /* this list is sorted by code, not name */
+    DATA( DECLRMM, 4 /* left/right margin mode */),
+  };
+  /* *INDENT-ON* */
+
+  int code;
+  int old_DECRPM = set_DECRPM(4);
+
+  code = any_RQM(PASS_ARGS, dec_modes, TABLESIZE(dec_modes), 1);
+  set_DECRPM(old_DECRPM);
+  return code;
+}
+
+#undef DATA
 
 /*
  * Allow user to test the same screens with/without lines.
@@ -35,13 +447,12 @@ toggle_lines_mode(MENU_ARGS)
 }
 
 /*
- * Allow user to test the same screens with/without colors.
- * VT420's do not support ANSI colors; this is for testing xterm.
+ * Allow user to test the same screens with/without origin-mode.
  */
-static int
-toggle_color_mode(MENU_ARGS)
+int
+toggle_DECOM(MENU_ARGS)
 {
-  do_colors = !do_colors;
+  origin_mode = !origin_mode;
   return MENU_NOHOLD;
 }
 
@@ -54,14 +465,14 @@ fill_screen(void)
   int y, x;
 
   if (do_colors) {
-    sgr(WHITE_ON_BLUE);
+    set_colors(WHITE_ON_BLUE);
     for (y = 0; y < max_lines - 4; ++y) {
       cup(y + 1, 1);
       for (x = 0; x < min_cols; ++x)
         putchar('E');
     }
     /* make this a different color to show fill versus erase diffs */
-    sgr(WHITE_ON_GREEN);
+    set_colors(WHITE_ON_GREEN);
   } else {
     decaln();   /* fill the screen */
   }
@@ -200,16 +611,34 @@ tst_DECBI(MENU_ARGS)
 {
   int n, m;
   int last = max_lines - 4;
-  int final = min_cols / 4;
+  int final;
+  int top;
+  int lft;
+  int rgt;
+
+  test_with_margins(1);
+
+  top = get_top_margin();
+  lft = get_left_margin();
+  rgt = get_right_margin();
+
+  final = (rgt - lft + 1) / 4;
+
+  set_colors(WHITE_ON_BLUE);
 
   for (n = final; n > 0; n--) {
-    cup(1, 1);
+    slowly();
+    cup(top, lft);
     if (n != final) {
       for (m = 0; m < 4; m++)
         decbi();
     }
     printf("%3d", n);
   }
+
+  reset_colors();
+
+  test_with_margins(0);
 
   vt_move(last, 1);
   vt_clear(0);
@@ -261,19 +690,20 @@ static int
 tst_DECCARA(MENU_ARGS)
 {
   int last = max_lines - 4;
-  int top = 5;
-  int left = 5;
-  int right = 45;
-  int bottom = max_lines - 10;
+  BOX box;
 
-  if (do_colors)
-    sgr(WHITE_ON_BLUE);
+  setup_rectangle(&box, last);
+
+  test_with_margins(1);
+
+  set_colors(WHITE_ON_BLUE);
 
   decsace(TRUE);
   fill_screen();
-  deccara(top, left, bottom, right, 7);   /* invert a rectangle) */
-  deccara(top + 1, left + 1, bottom - 1, right - 1, 0);   /* invert a rectangle) */
+  deccara(box.top, box.left, box.bottom, box.right, 7);   /* invert a rectangle) */
+  deccara(box.top + 1, box.left + 1, box.bottom - 1, box.right - 1, 0);   /* invert a rectangle) */
 
+  test_with_margins(0);
   sgr("0");
   vt_move(last, 1);
   vt_clear(0);
@@ -282,12 +712,16 @@ tst_DECCARA(MENU_ARGS)
   println("There should be an open rectangle formed by reverse-video E's");
   holdit();
 
+  test_with_margins(2);
   decsace(FALSE);
   fill_screen();
-  deccara(top, left, bottom, right, 7);   /* invert a rectangle) */
-  deccara(top + 1, left + 1, bottom - 1, right - 1, 0);   /* invert a rectangle) */
+  deccara(box.top, box.left, box.bottom, box.right, 7);   /* invert a rectangle) */
+  deccara(box.top + 1, box.left + 1, box.bottom - 1, box.right - 1, 0);   /* invert a rectangle) */
 
   sgr("0");
+
+  test_with_margins(0);
+
   vt_move(last, 1);
   vt_clear(0);
 
@@ -318,7 +752,7 @@ tst_DECCKSR(MENU_ARGS, int Pid, const char *the_csi)
       && strlen(report) > 1
       && scanto(report, &pos, '!') == Pid
       && report[pos++] == '~'
-      && (report = skip_digits(report + pos + 1)) != 0
+      && (report = skip_xdigits(report + pos + 1)) != 0
       && *report == '\0') {
     show_result(SHOW_SUCCESS);
   } else {
@@ -342,70 +776,93 @@ tst_DECCRA(MENU_ARGS)
 #define adj_DECCRA " (down %d, right %d)\r\n", box.bottom + 1 - box.top, box.right + 1 - box.left, adj_y, adj_x
 #define msg_DECCRA(msg) "The %dx%d box " msg adj_DECCRA
   BOX box;
+  int hmargin = origin_mode ? ((get_right_margin() * 3) / 8) : 30;
+  int vmargin = origin_mode ? ((get_bottom_margin(max_lines) * 2) / 5) : 10;
+  int last = max_lines - 3;
 
-  if (make_box_params(&box, 10, 30) == 0) {
+  if (make_box_params(&box, vmargin, hmargin) == 0) {
     box.top = 5;
     box.left = 5;
 
+    test_with_margins(1);
+
     if (do_colors) {
-      sgr(WHITE_ON_BLUE);
+      set_colors(WHITE_ON_BLUE);
     } else {
       sgr(BLINK_REVERSE);
     }
     draw_box_outline(&box, do_lines ? -1 : '*');
     sgr("0");
 
-    vt_move(max_lines - 3, 1);
+    test_with_margins(0);
+
+    vt_move(last, 1);
     println(the_title);
     tprintf(msg_DECCRA("will be copied"));
     holdit();
 
+    test_with_margins(2);
+
     deccra(box.top, box.left, box.bottom, box.right, 1,
            box.top + adj_y, box.left + adj_x, 1);
 
-    vt_move(max_lines - 2, 1);
+    test_with_margins(0);
+
+    vt_move(last, 1);
     vt_clear(0);
 
     tprintf(msg_DECCRA("should be copied, overlapping"));
     holdit();
 
-    ed(2);
+    test_with_margins(2);
 
-    make_box_params(&box, 10, 30);
+    make_box_params(&box, vmargin, hmargin);
     box.top = 5;
     box.left = 5;
 
     if (do_colors) {
-      sgr(YELLOW_ON_BLACK);
+      set_colors(YELLOW_ON_BLACK);
     } else {
       sgr("0;7");   /* fill the box in reverse */
     }
     draw_box_filled(&box, -1);
 
     if (do_colors) {
-      sgr(WHITE_ON_BLUE);
+      set_colors(WHITE_ON_BLUE);
     } else {
       sgr(BLINK_REVERSE);
     }
     draw_box_outline(&box, do_lines ? -1 : '*');
     sgr("0");
 
-    vt_move(max_lines - 3, 1);
+    test_with_margins(0);
+
+    vt_move(last, 1);
     println(the_title);
     tprintf(msg_DECCRA("will be copied"));
     holdit();
+
+    test_with_margins(2);
 
     sgr("0;4"); /* set underline, to check if that leaks through */
     deccra(box.top, box.left, box.bottom, box.right, 1,
            box.top + adj_y, box.left + adj_x, 1);
     sgr("0");
 
-    vt_move(max_lines - 2, 1);
+    test_with_margins(0);
+
+    vt_move(last, 1);
     vt_clear(0);
 
     tprintf(msg_DECCRA("should be copied, overlapping"));
   }
   return MENU_HOLD;
+}
+
+static int
+marker_of(int n)
+{
+  return (n - 1) % 26 + 'a';
 }
 
 /*
@@ -417,15 +874,129 @@ tst_DECDC(MENU_ARGS)
 {
   int n;
   int last = max_lines - 3;
+  int base_row;
+  int base_col;
+  int left_col;
+  int last_row;
+  int real_col;
+  int top;
+  int bot;
+  int lft;
+  int rgt;
+  int final_dc;
+  char mark_1st = 0;
+  char mark_2nd = 0;
 
-  for (n = 1; n < last; n++) {
-    __(cup(n, last - n + 22), printf("*"));
-    __(cup(1, 1), decdc(1));
+  test_with_margins(1);
+
+  set_colors(WHITE_ON_BLUE);
+
+  top = get_top_margin();
+  lft = get_left_margin();
+  rgt = get_right_margin();
+  bot = get_bottom_margin(last - 1);
+
+  /*
+   * Adjustments so that most of the initial line (before shifting) passes
+   * through the area within margins.
+   */
+  if (origin_mode) {
+    base_row = 0;
+    if (lrmm_flag) {
+      left_col = 1;
+      switch (tb_marg_flag) {
+      default:
+        last_row = bot;
+        break;
+      case marReset:
+      case marLast:
+        last_row = bot - 3;
+        break;
+      }
+      base_col = rgt - (bot - top) + last_row;
+      if (base_col < 0)
+        base_col = 0;
+      if (base_col > rgt)
+        base_col = rgt;
+      real_col = lr_marg1 + lft - (lr_marg1 != 0);
+    } else {
+      last_row = last;
+      base_col = (2 * last);
+      left_col = 1;
+      real_col = lft;
+    }
+  } else {
+    switch (lr_marg_flag) {
+    default:
+      base_col = (2 * last);
+      left_col = 1;
+      break;
+    case marFirst:
+      base_col = (min_cols / 2);
+      left_col = 1;
+      break;
+    case marMiddle:
+      base_col = (3 * min_cols) / 4;
+      left_col = (min_cols / 4) + 1;
+      break;
+    case marLast:
+      base_col = min_cols + 0;
+      left_col = (min_cols / 2) + 1;
+      break;
+    }
+    if (tb_marg_flag == marLast) {
+      base_row = max_lines / 2;
+    } else {
+      base_row = 0;
+    }
+    last_row = last;
+    real_col = lft;
   }
-  __(cup(1, 1), decdc(20));
 
+  final_dc = base_col - 1;
+
+  for (n = 1; n < last_row; n++) {
+    int row = base_row + n;
+    int col = base_col - n;
+
+    if (row <= last_row) {
+      int mark = marker_of(n);
+
+      if (row >= top && row <= bot && row < last_row) {
+        mark_2nd = (char) mark;
+        if (mark_1st == 0) {
+          mark_1st = (char) mark;
+        }
+      }
+
+      slowly();
+      __(cup(row, col), putchar(mark));
+      if (top > 1 || (lrmm_flag && lft > 1)) {
+        __(cup(1, 1), decdc(1));  /* outside margins, should be ignored */
+        __(cup(row, col), putchar(mark));
+      }
+      if (final_dc-- > left_col)
+        __(cup(top, lft), decdc(1));
+    }
+  }
+  if (final_dc > left_col) {
+    slowly();
+    __(cup(top, lft), decdc(final_dc - left_col));
+  }
+
+  reset_colors();
+
+  test_with_margins(0);
+
+  ruler(last, min_cols);
   vt_move(last + 1, 1);
-  println("If your terminal supports DECDC, there will be a column of *'s on the left");
+  vt_clear(0);
+
+  if (lrmm_flag)
+    tprintf("If your terminal supports DECDC, letters %c-%c are on column %d\n",
+            mark_1st, mark_2nd, real_col);
+  else
+    println("There should be a diagonal of letters from left near bottom to middle at top");
   return MENU_HOLD;
 }
 
@@ -436,15 +1007,464 @@ tst_DECDC(MENU_ARGS)
 static int
 tst_DECERA(MENU_ARGS)
 {
+  int last = max_lines - 3;
+  BOX box;
+
+  setup_rectangle(&box, last);
+
   fill_screen();
-  decera(5, 5, max_lines - 10, min_cols - 5);
+
+  test_with_margins(1);
+
+  set_colors(WHITE_ON_GREEN);
+
+  decera(box.top, box.left, box.bottom, box.right);
 
   sgr("0");
-  vt_move(max_lines - 3, 1);
+
+  test_with_margins(0);
+
+  vt_move(last, 1);
   vt_clear(0);
 
   println(the_title);
-  println("There should be a rectangle cleared in the middle of the screen.");
+  if (origin_mode)
+    println("There should be a rectangle cleared in the middle of the margins.");
+  else
+    println("There should be a rectangle cleared in the middle of the screen.");
+  return MENU_HOLD;
+}
+
+/*
+ * This is two tests:  IND (index) and RI (reverse index).  For each test, we
+ * start by filling the area inside (including) the margins with a test
+ * pattern, and then after the user presses "return", update the screen so that
+ * only one line of the test-pattern should remain visible.
+ */
+static int
+tst_IND_RI(MENU_ARGS)
+{
+  int hold_row = get_hold_row();
+  int hold_col = get_hold_col();  /* where to put "Push RETURN" */
+  int row;
+  int top = get_top_margin();
+  int bot = get_bottom_margin(max_lines);
+  int lft = get_left_margin();
+  int rgt = get_right_margin();
+
+  test_with_margins(1);
+
+  fill_margins();
+
+  set_colors(0);
+  special_prompt(hold_row, hold_col, 0);
+
+  set_colors(WHITE_ON_GREEN);
+  cup(bot, (lft + rgt) / 2);
+  for (row = top; row < bot; ++row) {
+    slowly();
+    ind();
+  }
+
+  set_colors(0);
+  special_prompt(hold_row, hold_col, "\"abcd...\" should be at top. ");
+
+  fill_margins();
+  fill_outside('.');
+
+  set_colors(0);
+  special_prompt(hold_row, hold_col, 0);
+
+  set_colors(WHITE_ON_GREEN);
+  cup(top, (lft + rgt) / 2);
+  for (row = top; row < bot; ++row) {
+    slowly();
+    ri();
+  }
+
+  set_colors(0);
+  special_prompt(hold_row, hold_col, "\"0123...\" should be at bottom. ");
+
+  test_with_margins(0);
+
+  return MENU_NOHOLD;
+}
+
+static int
+tst_IL_DL(MENU_ARGS)
+{
+  int hold_row = get_hold_row();
+  int hold_col = get_hold_col();  /* where to put "Push RETURN" */
+  int row;
+  int top = get_top_margin();
+  int bot = get_bottom_margin(max_lines);
+  int lft = get_left_margin();
+  int rgt = get_right_margin();
+
+  test_with_margins(1);
+
+  fill_margins();
+
+  set_colors(0);
+  special_prompt(hold_row, hold_col, 0);
+
+  /*
+   * This should be ignored because it is outside margins.
+   */
+  set_colors(WHITE_ON_GREEN);
+  if (!origin_mode) {
+    if (top > 1) {
+      cup(top - 1, lft);
+      il(1);
+    } else if (bot < max_lines) {
+      cup(bot + 1, lft);
+      il(1);
+    } else if (lft > 1) {
+      cup(top, lft - 1);
+      il(1);
+    } else if (rgt < min_cols) {
+      cup(top, rgt + 1);
+      il(1);
+    }
+  }
+
+  cup(top, (lft + rgt) / 2);
+  for (row = top; row < bot;) {
+    int skip = (row % 2) + 1;
+    row += skip;
+    if (row >= bot)
+      skip = 1;
+    slowly();
+    il(skip);
+  }
+
+  set_colors(0);
+  special_prompt(hold_row, hold_col, "\"0123...\" should be at bottom. ");
+
+  fill_margins();
+  fill_outside('.');
+
+  set_colors(0);
+  special_prompt(hold_row, hold_col, 0);
+
+  set_colors(WHITE_ON_GREEN);
+  cup(top, (lft + rgt) / 2);
+  for (row = top; row < bot;) {
+    int skip = (row % 2) + 1;
+    row += skip;
+    if (row >= bot)
+      skip = 1;
+    slowly();
+    dl(skip);
+  }
+
+  set_colors(0);
+  special_prompt(hold_row, hold_col, "\"abcd...\" should be at top. ");
+
+  test_with_margins(0);
+
+  return MENU_NOHOLD;
+}
+
+static int
+tst_ICH_DCH(MENU_ARGS)
+{
+  int n;
+  int last = max_lines - 3;
+  int base_row;
+  int base_col;
+  int left_col;
+  int last_row;
+  int last_col;
+  int real_col;
+  int top;
+  int bot;
+  int lft;
+  int rgt;
+  char mark_1st = 0;
+  char mark_2nd = 0;
+
+  test_with_margins(1);
+
+  set_colors(WHITE_ON_BLUE);
+
+  top = get_top_margin();
+  bot = get_bottom_margin(last - 1);
+  lft = get_left_margin();
+  rgt = get_right_margin();
+
+  /*
+   * Adjustments so that most of the initial line (before shifting) passes
+   * through the area within margins.
+   */
+  if (origin_mode) {
+    base_row = 0;
+    if (lrmm_flag) {
+      base_col = rgt - (bot - top) - 2;
+      if (base_col < 0)
+        base_col = 0;
+      last_col = rgt - 1;
+      switch (tb_marg_flag) {
+      default:
+        last_row = bot;
+        break;
+      case marReset:
+      case marLast:
+        last_row = bot - 3;
+        break;
+      }
+      real_col = rgt + lr_marg1 - (lr_marg1 != 0);
+    } else {
+      last_row = last;
+      base_col = (2 * last);
+      last_col = min_cols - 1;
+      real_col = rgt;
+    }
+  } else {
+    switch (lr_marg_flag) {
+    default:
+      base_col = (2 * last);
+      last_col = min_cols - 1;
+      break;
+    case marFirst:
+      base_col = 0;
+      last_col = min_cols / 2 - 1;
+      break;
+    case marMiddle:
+      base_col = min_cols / 4;
+      last_col = (3 * min_cols) / 4 - 1;
+      break;
+    case marLast:
+      base_col = (min_cols / 2);
+      last_col = min_cols - 1;
+      break;
+    }
+    if (tb_marg_flag == marLast) {
+      base_row = max_lines / 2;
+    } else {
+      base_row = 0;
+    }
+    last_row = last;
+    real_col = rgt;
+  }
+
+  for (n = 1; n < last_row; n++) {
+    int row = base_row + n;
+    int col = base_col + n;
+
+    if (row < last_row) {
+      int mark = marker_of(n);
+
+      if (row >= top && row <= bot && row < last_row) {
+        mark_2nd = (char) mark;
+        if (mark_1st == 0) {
+          mark_1st = (char) mark;
+        }
+      }
+
+      slowly();
+      __(cup(row, col), putchar(mark));
+      if (col < rgt) {
+        cup(row, lft);
+        putchar('?');
+        cup(row, lft);
+        ich(rgt - col - 1);
+      }
+    }
+  }
+
+  reset_colors();
+
+  test_with_margins(0);
+
+  ruler(last, min_cols);
+  vt_move(last + 1, 1);
+  vt_clear(0);
+
+  tprintf("If your terminal supports ICH, letters %c-%c are on column %d\n",
+          mark_1st, mark_2nd, real_col);
+  holdit();
+
+  vt_clear(0);
+  test_with_margins(1);
+
+  set_colors(WHITE_ON_BLUE);
+
+  /*
+   * Adjustments so that most of the initial line (before shifting) passes
+   * through the area within margins.
+   */
+  if (origin_mode) {
+    base_row = 0;
+    if (lrmm_flag) {
+      left_col = 1;
+      switch (tb_marg_flag) {
+      default:
+        last_row = bot;
+        break;
+      case marReset:
+      case marLast:
+        last_row = bot - 3;
+        break;
+      }
+      base_col = rgt - (bot - top) + last_row;
+      if (base_col < 0)
+        base_col = 0;
+      if (base_col > rgt)
+        base_col = rgt;
+      real_col = lr_marg1 + lft - (lr_marg1 != 0);
+    } else {
+      last_row = last;
+      base_col = (2 * last);
+      left_col = 1;
+      real_col = lft;
+    }
+  } else {
+    switch (lr_marg_flag) {
+    default:
+      base_col = (2 * last);
+      left_col = 1;
+      break;
+    case marFirst:
+      base_col = (min_cols / 2);
+      left_col = 1;
+      break;
+    case marMiddle:
+      base_col = (3 * min_cols) / 4;
+      left_col = (min_cols / 4) + 1;
+      break;
+    case marLast:
+      base_col = min_cols + 0;
+      left_col = (min_cols / 2) + 1;
+      break;
+    }
+    if (tb_marg_flag == marLast) {
+      base_row = max_lines / 2;
+    } else {
+      base_row = 0;
+    }
+    last_row = last;
+    real_col = lft;
+  }
+
+  for (n = 1; n < last_row; n++) {
+    int row = base_row + n;
+    int col = base_col - n;
+
+    if (row <= last_row) {
+      int mark = marker_of(n);
+
+      if (row >= top && row <= bot && row < last_row) {
+        mark_2nd = (char) mark;
+        if (mark_1st == 0) {
+          mark_1st = (char) mark;
+        }
+      }
+
+      __(cup(row, col), putchar(mark));
+      slowly();
+      if (col < rgt)
+        ech(rgt - col);
+      if (col > lft) {
+        cup(row, lft);
+        dch(col - lft);
+      } else {
+        cup(row, 1);
+        dch(col - 1);
+      }
+    }
+  }
+
+  reset_colors();
+
+  test_with_margins(0);
+
+  ruler(last, min_cols);
+  vt_move(last + 1, 1);
+  vt_clear(0);
+
+  tprintf("If your terminal supports DCH, letters %c-%c are on column %d\n",
+          mark_1st, mark_2nd, real_col);
+  return MENU_HOLD;
+}
+
+/*
+ * Check to see if ASCII formatting controls (BS, HT, CR) are affected by
+ * left/right margins.  Do this by starting after the left-margin, and
+ * backspacing "before" the left margin.  Then fill the margins with a usable
+ * test pattern.  After that, use tabs to go to the right margin, adding
+ * another usable test (+), and use carriage returns to go to the left margin,
+ * adding another usable test (-).
+ */
+static int
+tst_ASCII_format(MENU_ARGS)
+{
+  int last = max_lines - 4;
+  int top;
+  int bot;
+  int lft;
+  int rgt;
+  int n;
+  int tab;
+  int size;
+
+  test_with_margins(1);
+
+  top = get_top_margin();
+  bot = get_bottom_margin(last - 1);
+  lft = get_left_margin();
+  rgt = get_right_margin();
+
+  /*
+   * This should stop at the left margin, and the result overwritten by a
+   * fill-pattern.
+   */
+  set_colors(WHITE_ON_BLUE);
+  cup(top, rgt);
+  for (n = 0; n < rgt; ++n) {
+    printf("*%c%c", BS, BS);
+  }
+
+  /*
+   * Fill the margins with a repeating pattern.  Do it twice, to force it to
+   * scroll up.
+   */
+  set_colors(WHITE_ON_GREEN);
+  size = 2 * (rgt - lft + 1) * (bot - top + 1);
+  for (n = 0; n < size; ++n) {
+    int ch = ((n % 10) ? ((n % 10) + '0') : '_');
+    putchar(ch);
+  }
+
+  /*
+   * Mark the margins with '-' (left) and '+' (right).
+   */
+  set_colors(YELLOW_ON_BLACK);
+  cup(top, lft);
+  for (n = top; n <= bot; ++n) {
+    for (tab = 0; tab < (rgt - lft + 16) / TABWIDTH; ++tab) {
+      putchar(TAB);
+    }
+    putchar('+');
+    putchar(CR);
+    putchar('-');
+    putchar(TAB);
+    putchar('*');
+    if (n < bot) {
+      putchar(LF);
+    }
+  }
+
+  test_with_margins(0);
+
+  set_colors("0");
+
+  vt_move(last, 1);
+  vt_clear(0);
+
+  ruler(last, min_cols);
+  println(the_title);
+  println("A repeating \"0123456789_\" pattern should fall within the -/+ margins");
   return MENU_HOLD;
 }
 
@@ -468,16 +1488,34 @@ tst_DECFI(MENU_ARGS)
 {
   int n, m;
   int last = max_lines - 4;
-  int final = min_cols / 4;
+  int final;
+  int top;
+  int lft;
+  int rgt;
+
+  test_with_margins(1);
+
+  set_colors(WHITE_ON_BLUE);
+
+  top = get_top_margin();
+  lft = get_left_margin();
+  rgt = get_right_margin();
+
+  final = (rgt - lft + 1) / 4;
 
   for (n = 1; n <= final; n++) {
-    cup(1, min_cols - 3);
+    slowly();
+    cup(top, rgt - 3);
     printf("%3d", n);   /* leaves cursor in rightmost column */
     if (n != final) {
       for (m = 0; m < 4; m++)
         decfi();
     }
   }
+
+  reset_colors();
+
+  test_with_margins(0);
 
   vt_move(last, 1);
   vt_clear(0);
@@ -489,36 +1527,220 @@ tst_DECFI(MENU_ARGS)
 }
 
 /*
+ * Demonstrate whether cursor movement is limited by margins.  VT420 manual
+ * says that CUU/CUD will stop on the margins, but if outside the margins
+ * will proceed to the page border.  So we can test this by
+ *
+ * a) moving to the margin, and cursor up/down toward the border, placing a
+ * marker at the end of the cursor movement (to overwrite a prior marker placed
+ * explicitly on the border).
+ *
+ * b) repeat the process, going from the border into the area within margins.
+ *
+ * c) Even for the no-margins case, this is useful, since it demonstrates
+ * whether the cursor forces scrolling.
+ */
+static int
+tst_cursor_margins(MENU_ARGS)
+{
+  BOX box;
+  int last = get_hold_row();
+  int row;
+  int col;
+
+  test_with_margins(1);
+
+  box.top = get_top_margin();
+  box.left = get_left_margin();
+  box.right = get_right_margin();
+  box.bottom = get_bottom_margin(max_lines);
+
+  set_colors(WHITE_ON_BLUE);
+  draw_box_filled(&box, ' ');
+  draw_box_outline(&box, '*');
+  set_colors(WHITE_ON_GREEN);
+
+  for (row = box.top; row <= box.bottom; ++row) {
+    cup(row, box.left);
+    for (col = min_cols; col > 0; col--) {
+      cub(1);
+    }
+    putchar('l');
+  }
+
+  for (row = box.top; row <= box.bottom; ++row) {
+    cup(row, box.right);
+    for (col = 1; col <= min_cols; col++) {
+      cuf(1);
+    }
+    putchar('r');
+  }
+
+  for (col = box.left; col <= box.right; ++col) {
+    cup(box.top, col);
+    for (row = box.top; row > 0; row--) {
+      cuu(1);
+    }
+    putchar('u');
+  }
+
+  for (col = box.left; col <= box.right; ++col) {
+    cup(box.bottom, col);
+    for (row = box.bottom; row <= max_lines; row++) {
+      cud(1);
+    }
+    putchar('d');
+  }
+
+  set_colors("0");
+  test_with_margins(0);
+
+  vt_move(last, 1);
+  if (last > box.bottom)
+    vt_clear(0);
+
+  println(the_title);
+  println("A box of *'s was written on screen border, overwritten using margins (u/d/l/r)");
+  return MENU_HOLD;
+}
+
+/*
+ * Test movement with other things than cursor controls, i.e., BS, HT, CR, LF,
+ * to see how margins affect them.
+ */
+static int
+tst_other_margins(MENU_ARGS)
+{
+  BOX box;
+  int last = get_hold_row();
+  int row;
+  int col;
+
+  test_with_margins(1);
+
+  box.top = get_top_margin();
+  box.left = get_left_margin();
+  box.right = get_right_margin();
+  box.bottom = get_bottom_margin(max_lines);
+
+  set_colors(WHITE_ON_BLUE);
+  draw_box_filled(&box, ' ');
+  draw_box_outline(&box, '*');
+  set_colors(WHITE_ON_GREEN);
+
+  for (row = box.top; row <= box.bottom; ++row) {
+    cup(row, box.left);
+    for (col = box.left; col > 0; col--) {
+      putchar('\b');
+    }
+    putchar('l');
+  }
+
+  for (row = box.top; row <= box.bottom; ++row) {
+    cup(row, box.right);
+    for (col = 1; col <= min_cols; col++) {
+      putchar('\t');
+    }
+    putchar('r');
+  }
+
+  for (col = box.left; col <= box.right; ++col) {
+    cup(box.top, col);
+    putchar('u');
+    for (row = box.bottom; row > box.top; row--) {
+      ind();
+    }
+  }
+
+  for (col = box.left; col <= box.right; ++col) {
+    switch (col % 4) {
+    case 0:
+      cup(box.bottom, col);
+      putchar('d');
+      break;
+    case 1:
+      cup(box.top, col);
+      for (row = box.top; row < box.bottom; row++) {
+        putchar('\f');
+      }
+      putchar('d');
+      break;
+    case 2:
+      cup(box.top, col);
+      for (row = box.top; row < box.bottom; row++) {
+        nel();
+        cuf(col - 1);
+      }
+      putchar('d');
+      break;
+    case 3:
+      cup(box.bottom, col);
+      putchar('d');
+      for (row = box.top; row < box.bottom; row++) {
+        ri();
+      }
+      putchar('u');
+      break;
+    }
+  }
+
+  set_colors("0");
+  test_with_margins(0);
+
+  vt_move(last, 1);
+  if (hold_clear())
+    vt_clear(0);
+
+  println(the_title);
+  println("A box of *'s was written on screen border, overwritten using margins (u/d/l/r)");
+  return MENU_HOLD;
+}
+
+/*
  * VT400 & up
  * Fill Rectangular area
  */
 static int
 tst_DECFRA(MENU_ARGS)
 {
-  if (do_colors) {
-    sgr(WHITE_ON_BLUE);
-    vt_clear(2);
-    sgr(WHITE_ON_GREEN);
-  }
-  decfra('*', 5, 5, max_lines - 10, min_cols - 5);
+  int last = max_lines - 3;
+  BOX box;
 
-  vt_move(max_lines - 3, 1);
+  setup_rectangle(&box, last);
+
+  test_with_margins(1);
+
   if (do_colors) {
-    sgr("0");
+    set_colors(WHITE_ON_BLUE);
+    vt_clear(2);  /* xterm fills the whole screen's background */
+    set_colors(WHITE_ON_GREEN);
   }
+  decfra('*', box.top, box.left, box.bottom, box.right);
+
+  set_colors("0");
+
+  test_with_margins(0);
+
+  vt_move(last, 1);
   vt_clear(0);
 
   println(the_title);
-  println("There should be a rectangle of *'s in the middle of the screen.");
+  if (origin_mode)
+    println("There should be a rectangle of *'s in the middle of the margins.");
+  else
+    println("There should be a rectangle of *'s in the middle of the screen.");
   holdit();
 
-  if (do_colors) {
-    sgr(WHITE_ON_BLUE);
-  }
-  decfra(' ', 5, 5, max_lines - 10, min_cols - 5);
+  test_with_margins(2);
+
+  set_colors(WHITE_ON_BLUE);
+
+  decfra(' ', box.top, box.left, box.bottom, box.right);
   sgr("0");
 
-  vt_move(max_lines - 3, 1);
+  test_with_margins(0);
+
+  vt_move(last, 1);
   vt_clear(0);
 
   println(the_title);
@@ -535,15 +1757,142 @@ tst_DECIC(MENU_ARGS)
 {
   int n;
   int last = max_lines - 3;
+  int base_row;
+  int base_col;
+  int last_row;
+  int last_col;
+  int real_col;
+  int top;
+  int bot;
+  int lft;
+  int rgt;
+  int final_ic;
+  char mark_1st = 0;
+  char mark_2nd = 0;
 
-  for (n = 1; n < last; n++) {
-    __(cup(n, min_cols - 22 - last + n), printf("*"));
-    __(cup(1, 1), decic(1));
+  test_with_margins(1);
+
+  set_colors(WHITE_ON_BLUE);
+
+  top = get_top_margin();
+  bot = get_bottom_margin(last - 1);
+  lft = get_left_margin();
+  rgt = get_right_margin();
+
+  /*
+   * Adjustments so that most of the initial line (before shifting) passes
+   * through the area within margins.
+   */
+  if (origin_mode) {
+    base_row = 0;
+    if (lrmm_flag) {
+      base_col = rgt - (bot - top) - 2;
+      if (base_col < 0)
+        base_col = 0;
+      last_col = rgt - 1;
+      switch (tb_marg_flag) {
+      default:
+        last_row = bot;
+        break;
+      case marReset:
+      case marLast:
+        last_row = bot - 3;
+        break;
+      }
+      real_col = rgt + lr_marg1 - (lr_marg1 != 0);
+    } else {
+      last_row = last;
+      base_col = (2 * last);
+      last_col = min_cols - 1;
+      real_col = rgt;
+    }
+  } else {
+    if (lrmm_flag) {
+      switch (lr_marg_flag) {
+      default:
+        base_col = (2 * last);
+        last_col = min_cols - 1;
+        break;
+      case marFirst:
+        base_col = 0;
+        last_col = min_cols / 2 - 1;
+        break;
+      case marMiddle:
+        base_col = min_cols / 4;
+        last_col = (3 * min_cols) / 4 - 1;
+        break;
+      case marLast:
+        base_col = (min_cols / 2);
+        last_col = min_cols - 1;
+        break;
+      }
+    } else {
+      base_col = (2 * last);
+      last_col = min_cols - 1;
+    }
+    if (tb_marg_flag == marLast) {
+      base_row = max_lines / 2;
+    } else {
+      base_row = 0;
+    }
+    last_row = last;
+    real_col = rgt;
   }
-  decic(20);
 
+  final_ic = base_col;
+
+  for (n = 1; n < last_row; n++) {
+    int row = base_row + n;
+    int col = base_col + n;
+
+    if (row < last_row) {
+      int mark = marker_of(n);
+
+      if (row >= top && row <= bot && row < last_row) {
+        mark_2nd = (char) mark;
+        if (mark_1st == 0) {
+          mark_1st = (char) mark;
+        }
+      }
+
+      slowly();
+      __(cup(row, col), putchar(mark));
+      if (!origin_mode && (top > 1 || (lrmm_flag && lft > 1))) {
+        __(cup(1, 1), decic(1));  /* outside margins, should be ignored */
+        __(cup(row, col), putchar(mark));
+      }
+      if (final_ic++ <= last_col)
+        __(cup(top, lft), decic(1));
+    }
+  }
+  if (final_ic <= last_col) {
+    slowly();
+    decic(last_col - final_ic);
+  }
+
+  reset_colors();
+
+  test_with_margins(0);
+
+  ruler(last, min_cols);
   vt_move(last + 1, 1);
-  println("If your terminal supports DECIC, there will be a column of *'s on the right");
+  vt_clear(0);
+
+  if (lrmm_flag)
+    tprintf("If your terminal supports DECIC, letters %c-%c are on column %d\n",
+            mark_1st, mark_2nd, real_col);
+  else
+    println("There should be a diagonal of letters from left near top to middle at bottom");
+  return MENU_HOLD;
+}
+
+static int
+tst_DECIC_DECDC(MENU_ARGS)
+{
+  tst_DECIC(PASS_ARGS);
+  holdit();
+  vt_clear(2);
+  tst_DECDC(PASS_ARGS);
   return MENU_HOLD;
 }
 
@@ -625,17 +1974,22 @@ static int
 tst_DECRARA(MENU_ARGS)
 {
   int last = max_lines - 4;
-  int top = 5;
-  int left = 5;
-  int right = 45;
-  int bottom = max_lines - 10;
+  BOX box;
+
+  setup_rectangle(&box, last);
 
   decsace(TRUE);
   fill_screen();
-  decrara(top, left, bottom, right, 7);   /* invert a rectangle) */
-  decrara(top + 1, left + 1, bottom - 1, right - 1, 7);   /* invert a rectangle) */
+
+  test_with_margins(1);
+
+  decrara(box.top, box.left, box.bottom, box.right, 7);   /* invert a rectangle) */
+  decrara(box.top + 1, box.left + 1, box.bottom - 1, box.right - 1, 7);   /* invert a rectangle) */
 
   sgr("0");
+
+  test_with_margins(0);
+
   vt_move(last, 1);
   vt_clear(0);
 
@@ -645,10 +1999,16 @@ tst_DECRARA(MENU_ARGS)
 
   decsace(FALSE);
   fill_screen();
-  decrara(top, left, bottom, right, 7);   /* invert a rectangle) */
-  decrara(top + 1, left + 1, bottom - 1, right - 1, 7);   /* invert a rectangle) */
+
+  test_with_margins(1);
+
+  decrara(box.top, box.left, box.bottom, box.right, 7);   /* invert a rectangle) */
+  decrara(box.top + 1, box.left + 1, box.bottom - 1, box.right - 1, 7);   /* invert a rectangle) */
 
   sgr("0");
+
+  test_with_margins(0);
+
   vt_move(last, 1);
   vt_clear(0);
 
@@ -689,51 +2049,125 @@ tst_vt420_DECRQSS(MENU_ARGS)
 static int
 tst_DECSERA(MENU_ARGS)
 {
-  int top = 5;
-  int left = 5;
-  int right = min_cols - 5;
-  int bottom = max_lines - 10;
   int last = max_lines - 3;
+  BOX box;
 
-  fill_screen();
+  setup_rectangle(&box, last);
 
   /*
-   * Fill an area slightly smaller than we will erase.
+   * Part 1: clear the borders of a rectangle, leaving protect inner rectangle.
+   */
+  fill_screen();
+
+  test_with_margins(1);
+
+  set_colors(WHITE_ON_GREEN);
+
+  /*
+   * Protect an area slightly smaller than we will erase.
    *
    * That way (since the SGR color at this point differs from the color used to
    * fill the screen), we can see whether the colors are modified by the erase,
    * and if so, whether they come from the SGR color.
    */
-  decsca(0);
-  decfra('*', top + 1, left + 1, bottom - 1, right - 1);
+  decfra('*', box.top, box.left, box.bottom, box.right);
   decsca(1);
+  decfra('*', box.top + 1, box.left + 1, box.bottom - 1, box.right - 1);
+  decsca(0);
 
   sgr("0");
+
+  test_with_margins(0);
+
   vt_move(last, 1);
   vt_clear(0);
 
   println(the_title);
   tprintf("Rectangle %d,%d - %d,%d was filled using DECFRA\n",
-          top + 1,
-          left + 1,
-          bottom - 1,
-          right - 1);
+          box.top,
+          box.left,
+          box.bottom,
+          box.right);
   holdit();
 
-  sgr(WHITE_ON_GREEN);
-  decsera(top, left, bottom, right);  /* erase the inside */
-  decsca(0);
+  test_with_margins(2);   /* reenable but do not paint margins */
+
+  set_colors(WHITE_ON_BLUE);
+
+  decsera(box.top, box.left, box.bottom, box.right);  /* erase the border */
 
   sgr("0");
+
+  test_with_margins(0);
+
   vt_move(last, 1);
   vt_clear(0);
 
   println(the_title);
-  tprintf("Rectangle %d,%d - %d,%d is cleared using DECSERA\n",
-          top,
-          left,
-          bottom,
-          right);
+  tprintf("Border %d,%d - %d,%d is cleared using DECSERA\n",
+          box.top,
+          box.left,
+          box.bottom,
+          box.right);
+  holdit();
+
+  /*
+   * Part 2: clear within the borders instead of clearing the borders.
+   */
+  fill_screen();
+
+  test_with_margins(1);
+
+  set_colors(WHITE_ON_GREEN);
+
+  /*
+   * Protect a rectangle and overwrite an inner rectangle which is not
+   * protected.
+   *
+   * That way (since the SGR color at this point differs from the color used to
+   * fill the screen), we can see whether the colors are modified by the erase,
+   * and if so, whether they come from the SGR color.
+   */
+  decsca(1);
+  decfra('*', box.top, box.left, box.bottom, box.right);
+  decsca(0);
+  decfra('*', box.top + 1, box.left + 1, box.bottom - 1, box.right - 1);
+
+  sgr("0");
+
+  test_with_margins(0);
+
+  vt_move(last, 1);
+  vt_clear(0);
+
+  println(the_title);
+  tprintf("Rectangle %d,%d - %d,%d was filled using DECFRA\n",
+          box.top,
+          box.left,
+          box.bottom,
+          box.right);
+  holdit();
+
+  test_with_margins(2);   /* reenable but do not paint margins */
+
+  set_colors(WHITE_ON_BLUE);
+
+  decsera(box.top, box.left, box.bottom, box.right);  /* erase inside border */
+
+  sgr("0");
+
+  test_with_margins(0);
+
+  vt_move(last, 1);
+  vt_clear(0);
+
+  println(the_title);
+  tprintf("Inside %d,%d - %d,%d is cleared using DECSERA\n",
+          box.top + 1,
+          box.left + 1,
+          box.bottom - 1,
+          box.right - 1);
+
   return MENU_HOLD;
 }
 
@@ -766,7 +2200,8 @@ tst_DECSNLS(MENU_ARGS)
 static int
 tst_DSR_area_sum(MENU_ARGS)
 {
-  return tst_DECCKSR(PASS_ARGS, 1, "1;1;10;10;20;20*y");
+  /* compute a checksum on the title line, which contains some text */
+  return tst_DECCKSR(PASS_ARGS, 1, "1;1;1;1;2;80*y");
 }
 
 static int
@@ -855,56 +2290,105 @@ tst_SRM(MENU_ARGS)
 
 /******************************************************************************/
 
-static int
-tst_PageFormat(MENU_ARGS)
+void
+setup_vt420_cursor(MENU_ARGS)
 {
-  /* *INDENT-OFF* */
-  static MENU my_menu[] = {
-      { "Exit",                                              0 },
-      { "Test set columns per page (DECSCPP)",               not_impl },
-      { "Test columns mode (DECCOLM)",                       not_impl },
-      { "Test set lines per page (DECSLPP)",                 not_impl },
-      { "Test set left and right margins (DECSLRM)",         not_impl },
-      { "Test set vertical split-screen (DECVSSM)",          not_impl },
-      { "",                                                  0 }
-    };
-  /* *INDENT-ON* */
+  tb_marg_flag = marNone;
+  toggle_STBM(PASS_ARGS);
 
-  do {
-    vt_clear(2);
-    __(title(0), printf("Page Format Tests"));
-    __(title(2), println("Choose test type:"));
-  } while (menu(my_menu));
-  return MENU_NOHOLD;
+  lr_marg_flag = marNone;
+  toggle_SLRM(PASS_ARGS);
 }
 
-/******************************************************************************/
+void
+menus_vt420_cursor(void)
+{
+  sprintf(origin_mode_mesg, "%s DECOM (origin mode)", STR_ENABLE(origin_mode));
+  sprintf(lrmm_mesg, "%s DECLRMM (left/right mode)", STR_ENABLE(lrmm_flag));
+  sprintf(txt_override_color, "%s test-regions (xterm)",
+          do_colors ? "Color" : "Do not color");
+}
+
+void
+finish_vt420_cursor(MENU_ARGS)
+{
+  reset_colors();
+  do_colors = FALSE;
+
+  if (tb_marg_flag > marReset)
+    decstbm(0, 0);
+
+  if (lr_marg_flag > marReset) {
+    if (!lrmm_flag)
+      toggle_LRMM(PASS_ARGS);
+    decslrm(0, 0);
+  }
+
+  if (lrmm_flag)
+    toggle_LRMM(PASS_ARGS);
+
+  if (origin_mode) {
+    decom(FALSE);
+    origin_mode = FALSE;
+  }
+}
 
 /*
  * The main vt100 module tests CUP, HVP, CUF, CUB, CUU, CUD
  */
-static int
-tst_VT420_cursor(MENU_ARGS)
+int
+tst_vt420_cursor(MENU_ARGS)
 {
   /* *INDENT-OFF* */
   static MENU my_menu[] = {
       { "Exit",                                              0 },
       { "Test VT320 features",                               tst_vt320_cursor },
+      { origin_mode_mesg,                                    toggle_DECOM },
+      { lrmm_mesg,                                           toggle_LRMM },
+      { tb_marg_mesg,                                        toggle_STBM },
+      { lr_marg_mesg,                                        toggle_SLRM },
+      { txt_override_color,                                  toggle_color_mode, },
       { "Test Back Index (DECBI)",                           tst_DECBI },
       { "Test Forward Index (DECFI)",                        tst_DECFI },
+      { "Test cursor movement within margins",               tst_cursor_margins },
+      { "Test other movement (CR/HT/LF/FF) within margins",  tst_other_margins },
       { "",                                                  0 }
     };
   /* *INDENT-ON* */
+
+  setup_vt420_cursor(PASS_ARGS);
 
   do {
     vt_clear(2);
     __(title(0), printf("VT420 Cursor-Movement Tests"));
     __(title(2), println("Choose test type:"));
+    menus_vt420_cursor();
   } while (menu(my_menu));
+
+  finish_vt420_cursor(PASS_ARGS);
+
   return MENU_NOHOLD;
 }
 
 /******************************************************************************/
+
+static int
+show_DECSTBM(MENU_ARGS)
+{
+  int code;
+  decstbm(tb_marg1, tb_marg2);
+  code = rpt_DECSTBM(PASS_ARGS);
+  return code;
+}
+
+static int
+show_DECSLRM(MENU_ARGS)
+{
+  int code;
+  decslrm(lr_marg1, lr_marg2);
+  code = rpt_DECSLRM(PASS_ARGS);
+  return code;
+}
 
 /*
  * The main vt100 module tests IRM, DL, IL, DCH, ICH, ED, EL
@@ -916,17 +2400,34 @@ tst_VT420_editing(MENU_ARGS)
   /* *INDENT-OFF* */
   static MENU my_menu[] = {
       { "Exit",                                              0 },
-      { "Test Delete Column (DECDC)",                        tst_DECDC },
-      { "Test Insert Column (DECIC)",                        tst_DECIC },
+      { origin_mode_mesg,                                    toggle_DECOM },
+      { lrmm_mesg,                                           toggle_LRMM },
+      { tb_marg_mesg,                                        toggle_STBM },
+      { lr_marg_mesg,                                        toggle_SLRM },
+      { txt_override_color,                                  toggle_color_mode, },
+      { "Show DECRQM response for DECLRMM",                  show_DECLRMM },
+      { "Show DECRQSS response for DECSTBM",                 show_DECSTBM },
+      { "Show DECRQSS response for DECSLRM",                 show_DECSLRM },
+      { "Test insert/delete column (DECIC, DECDC)",          tst_DECIC_DECDC },
+      { "Test vertical scrolling (IND, RI)",                 tst_IND_RI },
+      { "Test insert/delete line (IL, DL)",                  tst_IL_DL },
+      { "Test insert/delete char (ICH, DCH)",                tst_ICH_DCH },
+      { "Test ASCII formatting (BS, CR, TAB)",               tst_ASCII_format },
       { "",                                                  0 }
     };
   /* *INDENT-ON* */
+
+  setup_vt420_cursor(PASS_ARGS);
 
   do {
     vt_clear(2);
     __(title(0), printf("VT420 Editing Sequence Tests"));
     __(title(2), println("Choose test type:"));
+    menus_vt420_cursor();
   } while (menu(my_menu));
+
+  finish_vt420_cursor(PASS_ARGS);
+
   return MENU_NOHOLD;
 }
 
@@ -966,12 +2467,15 @@ static int
 tst_VT420_rectangle(MENU_ARGS)
 {
   static char txt_override_lines[80];
-  static char txt_override_color[80];
   /* *INDENT-OFF* */
   static MENU my_menu[] = {
       { "Exit",                                              0 },
-      { txt_override_lines,                                  toggle_lines_mode, },
+      { origin_mode_mesg,                                    toggle_DECOM },
+      { lrmm_mesg,                                           toggle_LRMM },
+      { tb_marg_mesg,                                        toggle_STBM },
+      { lr_marg_mesg,                                        toggle_SLRM },
       { txt_override_color,                                  toggle_color_mode, },
+      { txt_override_lines,                                  toggle_lines_mode, },
       { "Test Change-Attributes in Rectangular Area (DECCARA)", tst_DECCARA },
       { "Test Copy Rectangular area (DECCRA)",               tst_DECCRA },
       { "Test Erase Rectangular area (DECERA)",              tst_DECERA },
@@ -982,24 +2486,22 @@ tst_VT420_rectangle(MENU_ARGS)
     };
   /* *INDENT-ON* */
 
-  /*
-   * Avoid confusion - terminal must be in VT420 mode to use these tests.
-   */
-  if (terminal_id() < 400) {
-    printf("Sorry, a real VT%d terminal doesn't implement rectangle operations\n",
-           terminal_id());
-    return MENU_HOLD;
-  }
+  setup_vt420_cursor(PASS_ARGS);
 
   do {
     vt_clear(2);
+    __(title(0), printf("VT420 Rectangular Area Tests%s",
+                        ((terminal_id() < 400)
+                         ? " (should not work)"
+                         : "")));
+    __(title(2), println("Choose test type:"));
+    menus_vt420_cursor();
     sprintf(txt_override_lines, "%s line-drawing characters",
             do_lines ? "Use" : "Do not use");
-    sprintf(txt_override_color, "%s background and rectangles (xterm)",
-            do_colors ? "Color" : "Do not color");
-    __(title(0), printf("VT420 Rectangular Area Tests"));
-    __(title(2), println("Choose test type:"));
   } while (menu(my_menu));
+
+  finish_vt420_cursor(PASS_ARGS);
+
   return MENU_NOHOLD;
 }
 
@@ -1022,7 +2524,7 @@ tst_vt420_device_status(MENU_ARGS)
       { "Test Memory Checksum",                              tst_DSR_memory_sum },
       { "Test Data Integrity",                               tst_DSR_data_ok },
       { "Test Multiple Session Status",                      tst_DSR_multisession },
-      { "Test Checksum of Rectangular Area",                 tst_DSR_area_sum },
+      { "Test Checksum of Rectangular Area (DECRQCRA)",      tst_DSR_area_sum },
       { "Test Extended Cursor-Position (DECXCPR)",           tst_DSR_cursor },
       { "",                                                  0 }
     };
@@ -1117,11 +2619,10 @@ tst_vt420(MENU_ARGS)
   static MENU my_menu[] = {
       { "Exit",                                              0 },
       { "Test VT320 features",                               tst_vt320 },
-      { "Test cursor-movement",                              tst_VT420_cursor },
+      { "Test cursor-movement",                              tst_vt420_cursor },
       { "Test editing sequences",                            tst_VT420_editing },
       { "Test keyboard-control",                             tst_VT420_keyboard_ctl },
       { "Test macro-definition (DECDMAC)",                   not_impl },
-      { "Test page-format controls",                         tst_PageFormat },
       { "Test rectangular area functions",                   tst_VT420_rectangle },
       { "Test reporting functions",                          tst_vt420_reports },
       { "Test screen-display functions",                     tst_VT420_screen },

@@ -1,4 +1,4 @@
-/* $Id: draw.c,v 1.9 2010/05/28 08:33:22 tom Exp $ */
+/* $Id: draw.c,v 1.11 2012/05/06 14:13:23 tom Exp $ */
 
 #include <vttest.h>
 #include <draw.h>
@@ -27,9 +27,9 @@ int
 make_box_params(BOX *box, int vmargin, int hmargin)
 {
   box->top = vmargin;
-  box->bottom = max_lines - vmargin;
+  box->bottom = get_bottom_margin(max_lines) - vmargin;
   box->left = hmargin;
-  box->right = min_cols - hmargin;
+  box->right = get_right_margin() - hmargin;
   return check_box_params(box);
 }
 
@@ -146,4 +146,20 @@ draw_box_caption(BOX *box, int margin, const char **c)
       y++;
     }
   }
+}
+
+void
+ruler(int row, int width)
+{
+  int col;
+  vt_move(row, 1);
+  for (col = 1; col <= width; ++col) {
+    int ch = (((col % 10) == 0)
+              ? ('0' + (col / 10) % 10)
+              : (((col % 5) == 0)
+                 ? '+'
+                 : '-'));
+    putchar(ch);
+  }
+  putchar('\n');
 }
