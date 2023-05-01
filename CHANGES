@@ -1,5 +1,38 @@
--- $Id: CHANGES,v 1.180 2014/03/06 00:28:40 tom Exp $
+-- $Id: CHANGES,v 1.194 2018/08/11 12:04:55 tom Exp $
 -------------------------------------------------------------------------------
+
+20180811
+	+ recent BSD-make mishandled .1.cat rule; fix
+
+20180728
+	+ update xterm DECRPM table
+
+20180725
+	+ remove obsolete message about diagonal in DECIC/DECDC test; since
+	  xterm #315 the test result is on the margin.
+
+	+ fix an off-by-one in right-margin for ICH/DCH test.
+
+	+ add tests for DECRSPS for xterm #334.
+
+	+ improve formatting of highlighted response-strings, fixing a problem
+	  with wrapping.
+
+20180702
+	+ updated test-packages to use recommended flags.
+
+	+ improved DECRQCRA check, updating to work with xterm #334.
+
+	+ add tests for xterm's extensions to DECSCUSR.
+
+	+ updated/improved configure macros
+
+	+ update config.guess, config.sub
+
+20150706
+	+ add configure option --with-man2html
+
+	+ update config.guess, config.sub
 
 20140305
 	+ save/restore color enable-flag for menu 11.6 in a couple of places

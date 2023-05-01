@@ -1,4 +1,4 @@
-/* $Id: mouse.c,v 1.33 2014/01/16 22:04:01 tom Exp $ */
+/* $Id: mouse.c,v 1.35 2018/07/26 00:32:06 tom Exp $ */
 
 #include <vttest.h>
 #include <esc.h>
@@ -10,7 +10,7 @@
 #define isReport(c) (get_level() >= 3 && (((c) == 'r') || ((c) == 'R')))
 #define isClear(c)  ((c) == ' ')
 
-#define ToData(n)  vt_move(4 + n, 10)
+#define ToData(n)  vt_move(report_row = 4 + n, report_col = 10)
 
 typedef enum {
   cDFT = 0,
@@ -142,9 +142,10 @@ static char *
 parse_mouse_M(char *report, unsigned *b, unsigned *x, unsigned *y)
 {
   char *result = 0;
-  char *finalp;
 
   if ((report = skip_csi(report)) != 0) {
+    char *finalp;
+
     switch (do_ExtCoords) {
     default:
     case cUTF:
@@ -157,6 +158,7 @@ parse_mouse_M(char *report, unsigned *b, unsigned *x, unsigned *y)
         result = report + pos;
       }
       break;
+
     case cSGR:
       if (*report++ == '<') {
         finalp = skip_params(report);
@@ -175,6 +177,7 @@ parse_mouse_M(char *report, unsigned *b, unsigned *x, unsigned *y)
         }
       }
       break;
+
     case cURX:
       finalp = skip_params(report);
       if (*finalp == 'M') {
@@ -186,6 +189,7 @@ parse_mouse_M(char *report, unsigned *b, unsigned *x, unsigned *y)
       break;
     }
   }
+
   return result;
 }
 
@@ -203,9 +207,10 @@ parse_mouse_T(char *report,
               unsigned *mouse_y)
 {
   char *result = 0;
-  char *finalp;
 
   if ((report = skip_csi(report)) != 0) {
+    char *finalp;
+
     switch (do_ExtCoords) {
     default:
     case cUTF:
@@ -221,10 +226,12 @@ parse_mouse_T(char *report,
         result = report + pos;
       }
       break;
+
     case cSGR:
       if (*report++ != '<')
         break;
       /* FALLTHRU */
+
     case cURX:
       finalp = skip_params(report);
       if (*finalp == 'T') {
@@ -239,6 +246,7 @@ parse_mouse_T(char *report,
       break;
     }
   }
+
   return result;
 }
 
@@ -250,9 +258,10 @@ static char *
 parse_mouse_t(char *report, unsigned *x, unsigned *y)
 {
   char *result = 0;
-  char *finalp;
 
   if ((report = skip_csi(report)) != 0) {
+    char *finalp;
+
     switch (do_ExtCoords) {
     default:
     case cUTF:
@@ -263,10 +272,12 @@ parse_mouse_t(char *report, unsigned *x, unsigned *y)
         *y = xterm_coord(report, &pos);
       }
       break;
+
     case cSGR:
       if (*report++ != '<')
         break;
       /* FALLTHRU */
+
     case cURX:
       finalp = skip_params(report);
       if (*finalp == 't') {
@@ -277,6 +288,7 @@ parse_mouse_t(char *report, unsigned *x, unsigned *y)
       break;
     }
   }
+
   return result;
 }
 
@@ -398,10 +410,11 @@ show_locator_report(char *report, int row, int pixels)
   int Pe, Pb, Pp;
   unsigned Pr, Pc;
   int now = row;
+  int report_row, report_col;
 
   ToData(0);
   vt_el(2);
-  chrprint(report);
+  chrprint2(report, report_row, report_col);
   while ((report = skip_csi(report)) != 0
          && (sscanf(report,
                     "%d;%d;%u;%u&w", &Pe, &Pb, &Pr, &Pc) == 4
@@ -469,7 +482,7 @@ show_dec_locator_events(MENU_ARGS, int mode, int pixels)
 {
   int row, now;
 
-first:
+loop:
   vt_move(1, 1);
   ed(0);
   println(the_title);
@@ -498,9 +511,9 @@ first:
       break;
     } else if (isReport(*report)) {
       show_mousemodes();
-      goto first;
+      goto loop;
     } else if (isClear(*report)) {
-      goto first;
+      goto loop;
     }
     row = 4;
     while (now > row) {
@@ -527,8 +540,9 @@ show_mouse_tracking(MENU_ARGS, const char *the_mode)
 {
   unsigned y = 0, x = 0;
   unsigned b, xx, yy;
+  int report_row, report_col;
 
-first:
+loop:
   vt_move(1, 1);
   ed(0);
   println(the_title);
@@ -546,14 +560,14 @@ first:
       break;
     } else if (isReport(*report)) {
       show_mousemodes();
-      goto first;
+      goto loop;
     } else if (isClear(*report)) {
-      goto first;
+      goto loop;
     }
 
     ToData(0);
     vt_el(2);
-    chrprint(report);
+    chrprint2(report, report_row, report_col);
 
     while ((report = parse_mouse_M(report, &b, &xx, &yy)) != 0) {
       unsigned adj = 1;
@@ -663,8 +677,9 @@ test_mouse_hilite(MENU_ARGS)
   unsigned start_x, end_x;
   unsigned start_y, end_y;
   unsigned mouse_y, mouse_x;
+  int report_row, report_col;
 
-first:
+loop:
   vt_move(1, 1);
   ed(0);
   println(the_title);
@@ -684,15 +699,15 @@ first:
       break;
     } else if (isReport(*report)) {
       show_mousemodes();
-      goto first;
+      goto loop;
     } else if (isClear(*report)) {
-      goto first;
+      goto loop;
     }
 
     show_hilite(first, last);
     ToData(1);
     vt_el(2);
-    chrprint(report);
+    chrprint2(report, report_row, report_col);
 
     if (parse_mouse_M(report, &b, &x, &y) != 0) {
       b &= 7;
@@ -763,8 +778,9 @@ static int
 test_X10_mouse(MENU_ARGS)
 {
   unsigned b, x, y;
+  int report_row, report_col;
 
-first:
+loop:
   vt_move(1, 1);
   ed(0);
   println(the_title);
@@ -781,13 +797,13 @@ first:
       break;
     } else if (isReport(*report)) {
       show_mousemodes();
-      goto first;
+      goto loop;
     } else if (isClear(*report)) {
-      goto first;
+      goto loop;
     }
     ToData(0);
     vt_el(2);
-    chrprint(report);
+    chrprint2(report, report_row, report_col);
     if ((report = parse_mouse_M(report, &b, &x, &y)) != 0) {
       cup((int) y, (int) x);
       printf("%u", b + 1);

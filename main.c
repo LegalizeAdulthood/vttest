@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.105 2014/01/16 21:15:19 tom Exp $ */
+/* $Id: main.c,v 1.110 2018/07/26 00:26:52 tom Exp $ */
 
 /*
                                VTTEST.C
@@ -126,8 +126,11 @@ main(int argc, char *argv[])
        */
       char *p = argv[0];
       char *q;
-      int values[3], n, m;
+      int values[3], n;
+
       for (n = 0; n < 3; n++) {
+        int m;
+
         if (!*p)
           break;
         if ((m = (int) strtol(p, &q, 10)) > 0) {
@@ -205,12 +208,13 @@ tst_movements(MENU_ARGS)
      Cursor control characters inside CSI sequences
    */
 
-  int i, row, col, pass, width, hlfxtra;
+  int i, row, col, pass, width;
   const char *ctext = "This is a correct sentence";
 
   set_tty_crmod(TRUE);  /* want to disable tab/space conversion */
 
   for (pass = 0; pass <= 1; pass++) {
+    int hlfxtra;
     int inner_l, inner_r;
 
     if (pass == 0) {
@@ -688,12 +692,12 @@ tst_doublesize(MENU_ARGS)
      DECDHL  (Double Height Line) (also implicit double width)
    */
 
-  int col, i, w, w1;
+  int col, i, w;
 
   /* Print the test pattern in both 80 and 132 character width  */
 
   for (w = 0; w <= 1; w++) {
-    w1 = 13 * w;
+    int w1 = 13 * w;
 
     ed(2);
     cup(1, 1);
@@ -1560,37 +1564,32 @@ chrprint2(const char *s, int row, int col)
 {
   int i;
   int result = row;
-  int tracks = (col += 2);
+  int tracks = col;
   char temp[80];
 
-  printf("  ");
   vt_hilite(TRUE);
   printf(" ");
-  tracks += 3;
+  tracks += 1;
 
   for (i = 0; s[i] != '\0'; i++) {
     int c = (unsigned char) s[i];
+    int step;
     if (c <= ' ' || c >= '\177') {
       sprintf(temp, "<%d> ", c);
     } else {
       sprintf(temp, "%c ", c);
     }
-    tracks += (int) strlen(temp);
-    if ((tracks > min_cols) && (col > 1)) {
+    step = (int) strlen(temp);
+    tracks += step;
+    if ((tracks >= min_cols) && (col > 1)) {
       vt_move(++result, col);
-      tracks = col + (int) strlen(temp);
+      tracks = col + step;
     }
     fputs(temp, stdout);
   }
 
   vt_hilite(FALSE);
   return result + 1;
-}
-
-void
-chrprint(const char *s)
-{
-  chrprint2(s, 1, 1);
 }
 
 /*
@@ -1685,12 +1684,24 @@ skip_digits(char *src)
   return (base == src) ? 0 : src;
 }
 
+#define xdigitOf(c) \
+        (((c) >= '0' && (c) <= '9') \
+         ? ((c) - '0') \
+         : (((c) >= 'A' && (c) <= 'F') \
+            ? ((c) + 10 - 'A') \
+            : ((c) + 10 - 'a')))
+
 char *
-skip_xdigits(char *src)
+skip_xdigits(char *src, int *value)
 {
   char *base = src;
-  while (*src != '\0' && isxdigit(CharOf(*src)))
+  *value = 0;
+  while (*src != '\0' && isxdigit(CharOf(*src))) {
+    int ch = CharOf(*src);
+    *value <<= 4;
+    *value += xdigitOf(ch);
     src++;
+  }
   return (base == src) ? 0 : src;
 }
 

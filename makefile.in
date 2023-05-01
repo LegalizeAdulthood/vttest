@@ -1,4 +1,4 @@
-# $Id: makefile.in,v 1.45 2014/01/16 20:31:58 tom Exp $
+# $Id: makefile.in,v 1.48 2018/08/11 12:02:36 tom Exp $
 # Makefile-template for 'vttest'
 
 THIS = vttest
@@ -15,6 +15,7 @@ CC		= @CC@
 CPP		= @CPP@
 LINK		= $(CC)
 LINT		= @LINT@
+LINT_OPTS	= @LINT_OPTS@
 INSTALL 	= @INSTALL@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
 INSTALL_DATA	= @INSTALL_DATA@
@@ -45,7 +46,7 @@ SHELL		= /bin/sh
 CPPFLAGS 	= -DHAVE_CONFIG_H -I. -I$(srcdir) @CPPFLAGS@
 
 ################################################################################
-.SUFFIXES : $o .i .cat
+.SUFFIXES : $o .i .cat .$(manext)
 
 .c$o:
 	@RULE_CC@
@@ -56,7 +57,7 @@ CPPFLAGS 	= -DHAVE_CONFIG_H -I. -I$(srcdir) @CPPFLAGS@
 	@ECHO_CC@$(CPP) -C $(CPPFLAGS) $*.c >$@
 
 .$(manext).cat :
-	- nroff -man $(srcdir)/$(THIS).$(manext) >$@
+	- nroff -man $(srcdir)/$< >$@
 
 ################################################################################
 
@@ -154,13 +155,13 @@ uninstall:
 	rm -f $(MANDIR)/$(actual_man)
 
 mostlyclean ::
-	rm -f *.[oi] core *~ *.BAK *.trace *.atac
+	rm -f *.[oi] core *~ *.cat *.BAK *.trace *.atac
 
 clean :: mostlyclean
 	rm -f $(PROG)
 
 distclean :: clean
-	rm -f makefile config.log config.cache config.status config.h
+	rm -f makefile config.log config.cache config.status config.h man2html.tmp
 
 realclean :: distclean
 	rm -f tags TAGS # don't remove configure!
@@ -204,7 +205,7 @@ $(THIS)$o:	config.h
 ################################################################################
 
 lint:
-	$(LINT) $(CPPFLAGS) $(C_SRC)
+	$(LINT) $(LINT_OPTS) $(CPPFLAGS) $(C_SRC)
 
 check: $(PROG)
 	@echo 'Sorry -- You must run this interactively.'

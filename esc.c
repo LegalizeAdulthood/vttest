@@ -1,9 +1,9 @@
-/* $Id: esc.c,v 1.86 2012/05/06 19:09:13 tom Exp $ */
+/* $Id: esc.c,v 1.90 2018/07/25 14:03:26 tom Exp $ */
 
 #include <vttest.h>
 #include <esc.h>
 
-/* FIXME: for Solaris 2.5, which is broken */
+/* This was needed for Solaris 2.5, whose standard I/O was broken */
 #define FLUSH fflush(stdout)
 
 static int soft_scroll;
@@ -68,6 +68,25 @@ const char *
 osc_output(void)
 {
   return output_8bits ? (const char *) osc_8 : osc_7;
+}
+
+/******************************************************************************/
+
+static char ss2_7[] =
+{ESC, 'N', 0};
+static unsigned char ss2_8[] =
+{0x8e, 0};
+
+char *
+ss2_input(void)
+{
+  return input_8bits ? (char *) ss2_8 : ss2_7;
+}
+
+char *
+ss2_output(void)
+{
+  return output_8bits ? (char *) ss2_8 : ss2_7;
 }
 
 /******************************************************************************/
@@ -278,7 +297,7 @@ do_osc(const char *fmt,...)
   }
 }
 
-void
+int
 print_chr(int c)
 {
   printf("%c", c);
@@ -288,11 +307,13 @@ print_chr(int c)
     put_char(log_fp, c);
     fputs("\n", log_fp);
   }
+  return 1;
 }
 
-void
+int
 print_str(const char *s)
 {
+  int result = (int) strlen(s);
   printf("%s", s);
 
   if (LOG_ENABLED) {
@@ -302,6 +323,7 @@ print_str(const char *s)
     }
     fputs("\n", log_fp);
   }
+  return result;
 }
 
 void
@@ -667,6 +689,12 @@ void
 decrqlp(int mode)               /* DECterm Request Locator Position */
 {
   do_csi("%d'|", mode);
+}
+
+void
+decrqpsr(int mode)              /* Request presentation report */
+{
+  do_csi("%d$w", mode);
 }
 
 void

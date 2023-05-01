@@ -1,4 +1,4 @@
-/* $Id: ttymodes.c,v 1.21 2011/12/06 10:29:59 tom Exp $ */
+/* $Id: ttymodes.c,v 1.23 2018/07/26 00:38:24 tom Exp $ */
 
 #include <vttest.h>
 #include <ttymodes.h>
@@ -166,11 +166,12 @@ close_tty(void)
 void
 init_ttymodes(int pn)
 {
-  int speed_code, n;
-
   dump_ttymodes("init_ttymodes", pn);
+
 #ifdef UNIX
   if (pn == 0) {
+    int speed_code, n;
+
     fflush(stdout);
 # if USE_POSIX_TERMIOS || USE_TERMIO
     tcgetattr(0, &old_modes);
@@ -310,7 +311,7 @@ set_tty_raw(int enabled)
   } else {
 #ifdef UNIX
 # if USE_POSIX_TERMIOS || USE_TERMIO
-    new_modes              = old_modes;   /* FIXME */
+    new_modes              = old_modes;
 # else /* USE_SGTTY */
     new_modes.sg_flags     &= ~RAW;
 #   ifdef HAVE_FCNTL_H

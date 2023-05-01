@@ -1,4 +1,4 @@
-/* $Id: esc.h,v 1.65 2012/05/06 19:08:45 tom Exp $ */
+/* $Id: esc.h,v 1.67 2018/07/25 11:38:43 tom Exp $ */
 
 #ifndef ESC_H
 #define ESC_H 1
@@ -110,6 +110,8 @@ char *get_reply(void);
 char *instr(void);
 const char *osc_input(void);
 const char *osc_output(void);
+char *ss2_input(void);
+char *ss2_output(void);
 char *ss3_input(void);
 char *ss3_output(void);
 char *st_input(void);
@@ -166,6 +168,7 @@ void decrara(int top, int left, int bottom, int right, int attr);
 void decrc(void);
 void decreqtparm(int pn);
 void decrqlp(int mode);
+void decrqpsr(int mode);
 void decrqss(const char *pn);
 void decsace(int flag);
 void decsasd(int pn);

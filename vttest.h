@@ -1,4 +1,4 @@
-/* $Id: vttest.h,v 1.98 2014/01/16 21:14:22 tom Exp $ */
+/* $Id: vttest.h,v 1.103 2018/07/25 14:02:16 tom Exp $ */
 
 #ifndef VTTEST_H
 #define VTTEST_H 1
@@ -24,7 +24,7 @@
 #define GCC_UNUSED  /* ARGSUSED */
 #endif
 
-#define SIG_ARGS int sig  /* FIXME: configure-test */
+#define SIG_ARGS int sig
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -45,21 +45,13 @@
 
 #if defined(HAVE_TERMIOS_H) && defined(HAVE_TCGETATTR)
 #  define USE_POSIX_TERMIOS 1
-#else
-#  ifdef HAVE_TERMIO_H
-#    define USE_TERMIO 1
-#  else
-#    ifdef HAVE_SGTTY_H
-#      define USE_SGTTY 1
-#      define USE_FIONREAD 1
-#    else
-#      ifdef VMS
-         /* FIXME */
-#      else
-please fix me
-#      endif
-#    endif
-#  endif
+#elif defined(HAVE_TERMIO_H)
+#  define USE_TERMIO 1
+#elif defined(HAVE_SGTTY_H)
+#  define USE_SGTTY 1
+#  define USE_FIONREAD 1
+#elif !defined(VMS)
+#  error please fix me
 #endif
 
 #ifndef USE_FIONREAD
@@ -248,7 +240,7 @@ extern char *skip_dcs(char *input);
 extern char *skip_digits(char *src);
 extern char *skip_prefix(const char *prefix, char *input);
 extern char *skip_ss3(char *input);
-extern char *skip_xdigits(char *src);
+extern char *skip_xdigits(char *src, int *value);
 extern const char *parse_Sdesig(const char *source, int *offset);
 extern const char *skip_csi_2(const char *input);
 extern const char *skip_dcs_2(const char *input);
@@ -282,6 +274,8 @@ extern int menu(MENU *table);
 extern int menu2(MENU *table, int tp);
 extern int not_impl(MENU_ARGS);
 extern int parse_decrqss(char *report, const char *func);
+extern int print_chr(int c);
+extern int print_str(const char *s);
 extern int rpt_DECSTBM(MENU_ARGS);
 extern int scan_any(char *str, int *pos, int toc);
 extern int scanto(const char *str, int *pos, int toc);
@@ -359,15 +353,12 @@ extern int tst_vt520_reports(MENU_ARGS);
 extern int tst_xterm(MENU_ARGS);
 extern int vt_move(int row, int col);
 extern void bye(void);
-extern void chrprint(const char *s);
 extern void default_level(void);
 extern void do_scrolling(void);
 extern void enable_logging(void);
 extern void finish_vt420_cursor(MENU_ARGS);
 extern void initterminal(int pn);
 extern void menus_vt420_cursor(void);
-extern void print_chr(int c);
-extern void print_str(const char *s);
 extern void reset_level(void);
 extern void restore_level(VTLEVEL *save);
 extern void save_level(VTLEVEL *save);

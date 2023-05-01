@@ -1,4 +1,4 @@
-/* $Id: vt52.c,v 1.17 2012/04/15 15:42:52 tom Exp $ */
+/* $Id: vt52.c,v 1.19 2018/07/26 00:42:11 tom Exp $ */
 
 #include <vttest.h>
 #include <ttymodes.h>
@@ -44,7 +44,6 @@ tst_vt52(MENU_ARGS)
 
   int i, j;
   char *response;
-  const char *temp;
   VTLEVEL save;
 
   save_level(&save);
@@ -160,10 +159,10 @@ tst_vt52(MENU_ARGS)
 
   restore_level(&save);
   restore_ttymodes();
-  padding(10);  /* some terminals miss part of the 'chrprint()' otherwise */
+  padding(10);  /* some terminals miss part of the response otherwise */
 
-  printf("Response was");
-  chrprint(response);
+  printf("Response was ");
+  chrprint2(response, 2, 13);
   for (i = 0; resptable[i].rcode[0] != '\0'; i++) {
     if (!strcmp(response, resptable[i].rcode)) {
       show_result("%s", resptable[i].rmsg);
@@ -180,7 +179,9 @@ tst_vt52(MENU_ARGS)
    * VT100 mode.
    */
   if (terminal_id() >= 200) {
-    int row = 8;
+    int row, col;
+
+    row = 8;
     set_level(0);   /* Reset ANSI (VT100) mode, Set VT52 mode  */
     println("Verify operating level after restoring ANSI mode");
     esc("<");   /* Enter ANSI mode (VT100 mode) */
@@ -192,9 +193,9 @@ tst_vt52(MENU_ARGS)
       println("");
       decrqss("\"p");
       response = get_reply();
-      vt_move(++row, 10);
+      vt_move(++row, col = 10);
       printf("Response was");
-      chrprint(response);
+      chrprint2(response, row, col);
       if (isreturn(response)) {
         show_result(SHOW_SUCCESS);
       } else {
@@ -207,15 +208,17 @@ tst_vt52(MENU_ARGS)
     }
 
     if (save.cur_level >= 2) {
+      const char *temp;
+
       vt_move(++row, 1);
       row = testing("S8C1T", row);
       s8c1t(1);
       cup(1, 1);
       dsr(6);
       response = instr();
-      vt_move(row, 10);
+      vt_move(row, col = 10);
       printf("Response to CUP(1,1)/DSR(6)");
-      chrprint(response);
+      chrprint2(response, row, col);
       if ((temp = skip_prefix(csi_input(), response)) != 0) {
         if (!strcmp("1;1R", temp)) {
           printf("S8C1T recognized --");

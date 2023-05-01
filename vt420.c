@@ -1,4 +1,4 @@
-/* $Id: vt420.c,v 1.163 2014/03/04 21:56:46 tom Exp $ */
+/* $Id: vt420.c,v 1.170 2018/07/26 00:41:17 tom Exp $ */
 
 /*
  * Reference:  Installing and Using the VT420 Video Terminal (North American
@@ -8,11 +8,6 @@
 #include <draw.h>
 #include <esc.h>
 #include <ttymodes.h>
-
-typedef struct {
-  int mode;
-  char *name;
-} MODES;
 
 typedef enum {
   marNone = -1,
@@ -463,9 +458,9 @@ toggle_DECOM(MENU_ARGS)
 static void
 fill_screen(void)
 {
-  int y, x;
-
   if (do_colors) {
+    int y, x;
+
     set_colors(WHITE_ON_BLUE);
     for (y = 0; y < max_lines - 4; ++y) {
       cup(y + 1, 1);
@@ -560,7 +555,7 @@ show_keypress(int row, int col)
   while (strcmp(report = instr(), last)) {
     vt_move(row, col);
     vt_clear(0);
-    chrprint(report);
+    chrprint2(report, row, col);
     strcpy(last, report);
   }
 }
@@ -653,6 +648,7 @@ tst_DECBI(MENU_ARGS)
 static int
 tst_DECBKM(MENU_ARGS)
 {
+  int row, col;
   char *report;
 
   vt_move(1, 1);
@@ -664,18 +660,18 @@ tst_DECBKM(MENU_ARGS)
   reset_inchar();
   decbkm(TRUE);
   println("Press the backspace key");
-  vt_move(3, 10);
+  vt_move(row = 3, col = 10);
   report = instr();
-  chrprint(report);
+  chrprint2(report, row, col);
   show_result(!strcmp(report, "\010") ? SHOW_SUCCESS : SHOW_FAILURE);
 
   reset_inchar();
   vt_move(5, 1);
   decbkm(FALSE);
   println("Press the backspace key again");
-  vt_move(6, 10);
+  vt_move(row = 6, col = 10);
   report = instr();
-  chrprint(report);
+  chrprint2(report, row, col);
   show_result(!strcmp(report, "\177") ? SHOW_SUCCESS : SHOW_FAILURE);
 
   vt_move(max_lines - 1, 1);
@@ -732,30 +728,48 @@ tst_DECCARA(MENU_ARGS)
   return MENU_HOLD;
 }
 
+#define fmt_DECCKSR "Testing DECCKSR: %s\n"
+
 static int
-tst_DECCKSR(MENU_ARGS, int Pid, const char *the_csi)
+tst_DECCKSR(MENU_ARGS, int Pid, const char *the_csi, int expected)
 {
   char *report;
+  char *before;
+  char *after;
   int pos = 0;
+  int actual;
+  int row, col;
 
   vt_move(1, 1);
-  printf("Testing DECCKSR: %s\n", the_title);
+  printf(fmt_DECCKSR, the_title);
 
   set_tty_raw(TRUE);
   set_tty_echo(FALSE);
 
   do_csi("%s", the_csi);
   report = get_reply();
-  vt_move(3, 10);
-  chrprint(report);
+  vt_move(row = 3, col = 10);
+  chrprint2(report, row, col);
   if ((report = skip_dcs(report)) != 0
       && strip_terminator(report)
       && strlen(report) > 1
       && scanto(report, &pos, '!') == Pid
       && report[pos++] == '~'
-      && (report = skip_xdigits(report + pos + 1)) != 0
-      && *report == '\0') {
-    show_result(SHOW_SUCCESS);
+      && (after = skip_xdigits((before = report + pos), &actual)) != 0
+      && *after == '\0') {
+    if ((after - before) != 4) {
+      show_result("%s: expected 4 digits", SHOW_FAILURE);
+    } else if (expected >= 0) {
+      if (actual == expected) {
+        show_result(SHOW_SUCCESS);
+      } else {
+        char msg[80];
+        sprintf(msg, "%04X", (expected & 0xffff));
+        show_result("expected %s", msg);
+      }
+    } else {
+      show_result(SHOW_SUCCESS);
+    }
   } else {
     show_result(SHOW_FAILURE);
   }
@@ -971,10 +985,10 @@ tst_DECDC(MENU_ARGS)
       }
 
       slowly();
-      __(cup(row, col), putchar(mark));
+      __(cup(row, col), print_chr(mark));
       if (top > 1 || (lrmm_flag && lft > 1)) {
         __(cup(1, 1), decdc(1));  /* outside margins, should be ignored */
-        __(cup(row, col), putchar(mark));
+        __(cup(row, col), print_chr(mark));
       }
       if (final_dc-- > left_col)
         __(cup(top, lft), decdc(1));
@@ -993,11 +1007,8 @@ tst_DECDC(MENU_ARGS)
   vt_move(last + 1, 1);
   vt_clear(0);
 
-  if (lrmm_flag)
-    tprintf("If your terminal supports DECDC, letters %c-%c are on column %d\n",
-            mark_1st, mark_2nd, real_col);
-  else
-    println("There should be a diagonal of letters from left near bottom to middle at top");
+  tprintf("If your terminal supports DECDC, letters %c-%c are on column %d\n",
+          mark_1st, mark_2nd, real_col);
   return MENU_HOLD;
 }
 
@@ -1256,12 +1267,12 @@ tst_ICH_DCH(MENU_ARGS)
       }
 
       slowly();
-      __(cup(row, col), putchar(mark));
+      __(cup(row, col), print_chr(mark));
       if (col < rgt) {
         cup(row, lft);
-        putchar('?');
+        print_chr('?');
         cup(row, lft);
-        ich(rgt - col - 1);
+        ich(rgt - col);
       }
     }
   }
@@ -1348,7 +1359,7 @@ tst_ICH_DCH(MENU_ARGS)
         }
       }
 
-      __(cup(row, col), putchar(mark));
+      __(cup(row, col), print_chr(mark));
       slowly();
       if (col < rgt)
         ech(rgt - col);
@@ -1843,10 +1854,10 @@ tst_DECIC(MENU_ARGS)
       }
 
       slowly();
-      __(cup(row, col), putchar(mark));
+      __(cup(row, col), print_chr(mark));
       if (!origin_mode && (top > 1 || (lrmm_flag && lft > 1))) {
         __(cup(1, 1), decic(1));  /* outside margins, should be ignored */
-        __(cup(row, col), putchar(mark));
+        __(cup(row, col), print_chr(mark));
       }
       if (final_ic++ <= last_col)
         __(cup(top, lft), decic(1));
@@ -1865,11 +1876,8 @@ tst_DECIC(MENU_ARGS)
   vt_move(last + 1, 1);
   vt_clear(0);
 
-  if (lrmm_flag)
-    tprintf("If your terminal supports DECIC, letters %c-%c are on column %d\n",
-            mark_1st, mark_2nd, real_col);
-  else
-    println("There should be a diagonal of letters from left near top to middle at bottom");
+  tprintf("If your terminal supports DECIC, letters %c-%c are on column %d\n",
+          mark_1st, mark_2nd, real_col);
   return MENU_HOLD;
 }
 
@@ -2158,23 +2166,27 @@ tst_DECSERA(MENU_ARGS)
   return MENU_HOLD;
 }
 
-/* FIXME: use DECRQSS to get reports */
 static int
 tst_DECSNLS(MENU_ARGS)
 {
   int rows;
+  int row, col;
+  char temp[80];
 
-  vt_move(1, 1);
+  vt_move(row = 1, col = 1);
   println("Testing Select Number of Lines per Screen (DECSNLS)");
+  println("");
 
   for (rows = 48; rows >= 24; rows -= 12) {
     set_tty_raw(TRUE);
     set_tty_echo(FALSE);
 
-    printf("%d Lines/Screen: ", rows);
+    row += 2;
+    sprintf(temp, "%d Lines/Screen:", rows);
+    fputs(temp, stdout);
     decsnls(rows);
     decrqss("*|");
-    chrprint(instr());
+    chrprint2(instr(), row, (int) strlen(temp));
     println("");
 
     restore_ttymodes();
@@ -2187,8 +2199,27 @@ tst_DECSNLS(MENU_ARGS)
 static int
 tst_DSR_area_sum(MENU_ARGS)
 {
+  char buffer[1024];
+  int expected = 0;
+  int pid = 1;
+  int page = 1;
+  int r, c;
+  int rows = 2;                 /* first two rows have known content */
+  size_t len;
+
+  sprintf(buffer, fmt_DECCKSR, the_title);
+  len = strlen(buffer) - 1;
+  memset(buffer + len, ' ', sizeof(buffer) - len);
+  for (r = 0; r < rows; ++r) {
+    for (c = 0; c < min_cols; ++c) {
+      expected += (unsigned char) buffer[(min_cols * r) + c];
+      expected &= 0xffff;
+    }
+  }
+
   /* compute a checksum on the title line, which contains some text */
-  return tst_DECCKSR(PASS_ARGS, 1, "1;1;1;1;2;80*y");
+  sprintf(buffer, "%d;%d;1;1;%d;%d*y", pid, page, rows, min_cols);
+  return tst_DECCKSR(PASS_ARGS, 1, buffer, expected);
 }
 
 static int
@@ -2200,6 +2231,7 @@ tst_DSR_data_ok(MENU_ARGS)
 static int
 tst_DSR_macrospace(MENU_ARGS)
 {
+  int row, col;
   char *report;
   const char *show;
 
@@ -2211,8 +2243,8 @@ tst_DSR_macrospace(MENU_ARGS)
 
   do_csi("?62n");
   report = instr();
-  vt_move(3, 10);
-  chrprint(report);
+  vt_move(row = 3, col = 10);
+  chrprint2(report, row, col);
   if ((report = skip_csi(report)) != 0
       && (report = skip_digits(report)) != 0
       && !strcmp(report, "*{")) {
@@ -2230,7 +2262,7 @@ tst_DSR_macrospace(MENU_ARGS)
 static int
 tst_DSR_memory_sum(MENU_ARGS)
 {
-  return tst_DECCKSR(PASS_ARGS, 1, "?63;1n");
+  return tst_DECCKSR(PASS_ARGS, 1, "?63;1n", -1);
 }
 
 static int
