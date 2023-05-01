@@ -1,5 +1,5 @@
 ; Maintain the C/H code w/o tabs
-source ~tom/.vilerc
+source ~/.vilerc
 store-procedure my_read_hook
 	~if &loc cmode
 	setl sw=2

@@ -1,3 +1,10 @@
+vttest-cur (2.7.20130818) unstable; urgency=low
+
+  * optionally highlight NRC mappings in character set tests.
+  * minor change to show if cursor-position report accounts for origin-mode
+
+ -- Thomas E. Dickey <dickey@invisible-island.net>  Fri, 09 Aug 2013 18:17:35 -0400
+
 vttest-cur (2.7.20120603) unstable; urgency=low
 
   * minor change to show if cursor goes to first column on IL/DL

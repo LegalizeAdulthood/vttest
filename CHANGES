@@ -1,5 +1,28 @@
--- $Id: CHANGES,v 1.158 2012/06/03 16:52:19 tom Exp $
+-- $Id: CHANGES,v 1.163 2013/08/18 18:23:16 tom Exp $
 -------------------------------------------------------------------------------
+
+20130818
+	+ modify character-sets screens to optionally highlight the characters
+	  which do not correspond to ISO-8859-1.  This makes the National
+	  Replacement Characters easier to see.
+
+	+ modify DSR cursor-position report to check if the terminal 
+	  accounts for origin-mode.
+
+	+ support --datarootdir option in makefile.in, to match configure
+	  script updates.
+
+	+ updated configure macros:
+
+	  + change from byacc for autoheader
+
+	  + improved checks for gcc attributes
+
+	  + improved checks for gcc version
+
+	  + miscellaneous fixes in CF_XOPEN_SOURCE
+
+	+ update config.guess, config.sub
 
 20120603
 	+ change cursor-position before IL/DL in 
@@ -355,7 +378,7 @@
 
 	  + use 96-character control sequences only for character sets
 	    (Latin 1), and 94-character control sequences for the
-	    National Replacement character sets.
+	    National Replacement Characters.
 
 	  + add ISO Latin-1 as a font option
 
