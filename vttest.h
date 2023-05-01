@@ -1,4 +1,4 @@
-/* $Id: vttest.h,v 1.106 2020/06/09 19:25:58 tom Exp $ */
+/* $Id: vttest.h,v 1.109 2022/08/27 14:24:03 tom Exp $ */
 
 #ifndef VTTEST_H
 #define VTTEST_H 1
@@ -168,6 +168,10 @@ extern jmp_buf intrenv;
 
 #if !defined(__GNUC__) && !defined(__attribute__)
 #define __attribute__(p)  /* nothing */
+#endif
+
+#ifndef GCC_NORETURN
+#define GCC_NORETURN  /* nothing */
 #endif
 
 #ifndef GCC_PRINTFLIKE
@@ -360,6 +364,7 @@ extern void enable_logging(void);
 extern void finish_vt420_cursor(MENU_ARGS);
 extern void initterminal(int pn);
 extern void menus_vt420_cursor(void);
+extern void reset_colors(void);
 extern void reset_level(void);
 extern void restore_level(VTLEVEL *save);
 extern void save_level(VTLEVEL *save);
@@ -375,5 +380,8 @@ extern void test_with_margins(int enable);
 extern void vt_clear(int code);
 extern void vt_el(int code);
 extern void vt_hilite(int flag);
+
+extern GCC_NORETURN void failed(const char *);
+extern GCC_NORETURN void no_memory(void);
 
 #endif /* VTTEST_H */
